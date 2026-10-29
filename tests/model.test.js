@@ -141,3 +141,15 @@ test("live status, devices and clients produce rows", () => {
   console.log(Model.tooltip(status, Model.overallState(status, false)))
   console.log(JSON.stringify(Model.summaryRows(status).map((r) => [r.title, r.subtitle]), null, 1))
 })
+
+test("hero: controller name, falling back to UniFi", () => {
+  const s = { controller: { name: "Gateway-1", osVersion: "5.1.33", networkVersion: "10.6.109" }, rows: [] }
+  assert.equal(Model.controllerName(s), "Gateway-1")
+  assert.equal(Model.controllerName({ rows: [] }), "UniFi")
+  assert.equal(Model.controllerName(null), "UniFi")
+})
+
+test("hero: live status names the controller", () => {
+  const s = unifictl("status")
+  assert.notEqual(Model.controllerName(s), "UniFi")
+})

@@ -133,6 +133,12 @@ function headline(status) {
   return "All systems normal"
 }
 
+// The panel hero names the controller.
+function controllerName(status) {
+  var c = status && status.controller
+  return c && c.name ? String(c.name) : "UniFi"
+}
+
 function tooltip(status, state) {
   if (state === "loading") return "UniFi: loading…"
   if (!status) return "UniFi: unavailable"

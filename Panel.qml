@@ -384,7 +384,7 @@ Panel {
           PanelHero {
             visible: root.view === ""
             width: parent.width
-            title: "UniFi"
+            title: Model.controllerName(root.status)
             meta: root.status ? Model.headline(root.status) : (service.lastError || "Loading…")
             foreground: root.foreground
             fontFamily: root.fontFamily
