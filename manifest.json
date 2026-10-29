@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 1,
+  "id": "bwilczynski.unifictl",
+  "name": "UniFi (unifictl)",
+  "version": "0.1.0",
+  "author": "Bartłomiej Wilczyński",
+  "license": "MIT",
+  "description": "UniFi network health in the Omarchy bar, driven by unifictl: WANs, devices, Wi-Fi, wired, alarms, updates, and clients.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "UniFi (unifictl)",
+    "description": "Site health from `unifictl status`, with devices and clients one click away.",
+    "category": "Network",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "refreshIntervalSec": 60,
+      "barLabel": "none",
+      "maxClients": 10,
+      "notify": true,
+      "consoleUrl": ""
+    },
+    "schema": [
+      {
+        "key": "refreshIntervalSec",
+        "type": "integer",
+        "label": "Refresh interval (seconds)",
+        "min": 15,
+        "max": 3600,
+        "step": 15,
+        "defaultValue": 60
+      },
+      {
+        "key": "barLabel",
+        "type": "enum",
+        "label": "Text beside the icon",
+        "options": [
+          "none",
+          "clients",
+          "latency"
+        ],
+        "defaultValue": "none"
+      },
+      {
+        "key": "maxClients",
+        "type": "integer",
+        "label": "Rows per drill-down view (clients, alarms)",
+        "min": 1,
+        "max": 50,
+        "defaultValue": 10
+      },
+      {
+        "key": "notify",
+        "type": "boolean",
+        "label": "Notify when the network degrades or recovers",
+        "defaultValue": true
+      },
+      {
+        "key": "consoleUrl",
+        "type": "string",
+        "label": "UniFi console URL (opened with right-click or o)",
+        "defaultValue": ""
+      }
+    ]
+  }
+}
