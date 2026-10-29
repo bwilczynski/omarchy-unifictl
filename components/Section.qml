@@ -9,6 +9,7 @@ import qs.Ui
 //   {
 //     icon, title, subtitle, trailing, trailingIcon,   // what the row shows
 //     attention: bool, muted: bool,                   // urgent tint / dimmed
+//     grade: "good" | "fair" | "poor" | "",           // colours `trailing`
 //     copy: { ip: "…", name: "…", mac: "…" },         // c / n / m keys
 //     action: "copy:ip" | "console" | "setup"         // Enter and click
 //   }
@@ -81,6 +82,7 @@ Column {
         trailingIcon: modelData.trailingIcon || ""
         attention: modelData.attention === true
         muted: modelData.muted === true
+        grade: modelData.grade || ""
         onActivated: section.activate(index)
       }
     }

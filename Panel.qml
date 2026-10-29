@@ -26,6 +26,30 @@ Panel {
   readonly property color dim: Qt.darker(foreground, 1.55)
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
 
+  // Grade colours mirror unifictl's tables: green, yellow, red from the
+  // theme. A theme without them leaves good dim, fair plain, poor urgent.
+  property var grades: Model.gradeColors("")
+  function gradeColor(grade) {
+    if (grade === "good") return grades.good !== "" ? grades.good : dim
+    if (grade === "fair") return grades.fair !== "" ? grades.fair : foreground
+    if (grade === "poor") return grades.poor !== "" ? grades.poor : urgent
+    return dim
+  }
+
+  FileView {
+    id: themeColors
+    path: Color.currentThemePath + "/colors.toml"
+    watchChanges: true
+    printErrors: false
+    onFileChanged: reload()
+    onLoaded: root.grades = Model.gradeColors(text())
+  }
+
+  // A theme switch swaps the theme directory under the watcher; Color
+  // repaints when it happens, so reread then too.
+  readonly property string themeKey: String(Color.foreground) + String(Color.urgent) + String(Color.accent)
+  onThemeKeyChanged: themeColors.reload()
+
   readonly property var status: service.status
   readonly property string health: service.health
   readonly property int maxClients: Math.max(1, parseInt(setting("maxClients", 10), 10) || 10)
@@ -58,7 +82,7 @@ Panel {
   }
 
   function navigableSections() {
-    var all = view === "" ? [wanSection, summarySection] : [detailSection]
+    var all = view === "" ? [wanSection, selfSection, summarySection] : [detailSection]
     return all.filter(function(s) { return s.available })
   }
 
@@ -215,6 +239,7 @@ Panel {
     view: root.opened ? root.view : ""
     logLines: root.maxClients
     onStatusChanged: Qt.callLater(root.clampCursor)
+    onSelfClientChanged: Qt.callLater(root.clampCursor)
     onDevicesChanged: Qt.callLater(root.clampCursor)
     onClientsChanged: Qt.callLater(root.clampCursor)
     onLogsChanged: Qt.callLater(root.clampCursor)
@@ -251,7 +276,7 @@ Panel {
       return "ok"
     }
     function currentView(): string { return root.view }
-    function rowCount(): int { return root.view === "" ? wanSection.rowCount + summarySection.rowCount : detailSection.rowCount }
+    function rowCount(): int { return root.view === "" ? wanSection.rowCount + selfSection.rowCount + summarySection.rowCount : detailSection.rowCount }
   }
 
   // ---- bar button -------------------------------------------------------------
@@ -388,6 +413,15 @@ Panel {
             sectionId: "wan"
             heading: "INTERNET"
             rows: Model.wanRows(root.status)
+          }
+
+          Section {
+            id: selfSection
+            visible: root.view === "" && available
+            panel: root
+            sectionId: "self"
+            heading: "THIS DEVICE"
+            rows: Model.selfRows(service.selfClient)
           }
 
           Section {

@@ -144,11 +144,51 @@ function tooltip(status, state) {
   return lines.join("\n")
 }
 
+// ---- health grades ----------------------------------------------------------
+
+// unifictl grades a value as good/fair/poor next to it in JSON
+// (`latencyHealth`, `signalStrengthHealth`, …). Anything else is ungraded.
+function grade(value) {
+  var g = String(value || "")
+  return g === "good" || g === "fair" || g === "poor" ? g : ""
+}
+
+function isPoor(value) {
+  return grade(value) === "poor"
+}
+
+// Theme colours for the grades, read from the theme's colors.toml: green,
+// yellow and red, or the ANSI color2/3/1 when a theme only has those.
+// Returns "" for a grade the theme gives no colour.
+function gradeColors(colorsToml) {
+  var found = {}
+  var lines = String(colorsToml || "").split("\n")
+  for (var i = 0; i < lines.length; i++) {
+    var m = lines[i].match(/^\s*([A-Za-z0-9_]+)\s*=\s*["']?(#[0-9A-Fa-f]{6})/)
+    if (m) found[m[1]] = m[2]
+  }
+  return {
+    good: found.green || found.color2 || "",
+    fair: found.yellow || found.color3 || "",
+    poor: found.red || found.color1 || ""
+  }
+}
+
+var LINK_SPEEDS = { e: "10 Mbps", fe: "100 Mbps", gbe1: "1 GbE", gbe2p5: "2.5 GbE", gbe5: "5 GbE", gbe10: "10 GbE" }
+
+function formatLinkSpeed(speed) {
+  if (!speed) return ""
+  return LINK_SPEEDS[speed] || String(speed)
+}
+
 // ---- popup rows -----------------------------------------------------------
 //
 // Row descriptor consumed by components/Section.qml:
 //   { icon, title, subtitle, trailing, trailingIcon, attention, muted,
-//     copy: { ip, name, mac }, action }
+//     grade, copy: { ip, name, mac }, action }
+//
+// `grade` is unifictl's health grade for the trailing value ("good", "fair",
+// "poor", or "" when ungraded); the row colours that value with it.
 
 function wanRows(status) {
   var wans = rowsByArea(status, "wan")
@@ -165,7 +205,8 @@ function wanRows(status) {
         ? join([w.ipAddress, "up " + formatDuration(w.uptime), w.availability !== null ? w.availability + "% 24h" : "", outages > 0 ? outages + " outage(s) 24h" : ""])
         : join([w.status, w.downtime ? "down " + formatDuration(w.downtime) : ""]),
       trailing: up && w.latency !== null ? w.latency + " ms" : "",
-      attention: verdictLevel(r.verdict) > 0,
+      grade: up ? grade(w.latencyHealth) : "",
+      attention: verdictLevel(r.verdict) > 0 || isPoor(w.latencyHealth) || isPoor(w.availabilityHealth),
       muted: r.verdict === "idle",
       copy: { ip: w.ipAddress || "", name: w.name || "" },
       action: "copy:ip"
@@ -270,7 +311,8 @@ function deviceRows(devices) {
       title: d.name,
       subtitle: join([d.ip, d.model, up ? "up " + formatDuration(d.uptime) : d.status]),
       trailing: d.experience !== undefined && d.experience !== null ? d.experience + "%" : "",
-      attention: !up,
+      grade: grade(d.experienceHealth),
+      attention: !up || isPoor(d.experienceHealth),
       copy: { ip: d.ip || "", name: d.name || "", mac: d.mac || "" },
       action: "copy:ip"
     })
@@ -284,6 +326,38 @@ function clientMatches(c, filter) {
   var to = c.connectedTo || {}
   var hay = [c.name, c.ip, c.mac, to.ssid, to.device ? to.device.name : ""].join(" ").toLowerCase()
   return hay.indexOf(q) !== -1
+}
+
+// One client: where it is attached, and the graded value that says how well
+// (signal for Wi-Fi, link speed for a cable).
+function clientRow(c) {
+  var to = c.connectedTo || {}
+  var wireless = c.connectionType === "wireless"
+  var where = to.device ? to.device.name : ""
+  if (wireless && to.ssid) where = to.ssid + " @ " + where
+  else if (!wireless && to.port !== undefined && to.port !== null) where = where + " port " + to.port
+  var value = wireless
+    ? (to.signalStrength !== undefined && to.signalStrength !== null ? to.signalStrength + " dBm" : "")
+    : formatLinkSpeed(to.linkSpeed)
+  var g = grade(wireless ? to.signalStrengthHealth : to.linkSpeedHealth)
+  return {
+    icon: wireless ? ICONS.wifi : ICONS.ethernet,
+    title: c.name || c.mac,
+    subtitle: join([c.ip, where]),
+    trailing: value,
+    grade: g,
+    attention: g === "poor",
+    copy: { ip: c.ip || "", name: c.name || "", mac: c.mac || "" },
+    action: "copy:ip"
+  }
+}
+
+// This machine, from `unifictl clients list --self`: one row per connection
+// the controller sees (cable and Wi-Fi at once give two). Empty when the
+// controller does not know it (off-site, VPN, older unifictl).
+function selfRows(self) {
+  var items = self && Array.isArray(self.items) ? self.items : []
+  return items.map(clientRow)
 }
 
 function clientRows(clients, max, filter, connectionType) {
@@ -300,23 +374,7 @@ function clientRows(clients, max, filter, connectionType) {
   })
   var list = []
   var shown = Math.min(items.length, max)
-  for (var i = 0; i < shown; i++) {
-    var c = items[i]
-    var to = c.connectedTo || {}
-    var wireless = c.connectionType === "wireless"
-    var where = to.device ? to.device.name : ""
-    if (wireless && to.ssid) where = to.ssid + " @ " + where
-    else if (!wireless && to.port !== undefined) where = where + " port " + to.port
-    list.push({
-      icon: wireless ? ICONS.wifi : ICONS.ethernet,
-      title: c.name || c.mac,
-      subtitle: join([c.ip, where]),
-      trailing: wireless && to.signalStrength !== undefined ? to.signalStrength + " dBm" : "",
-      attention: wireless && to.signalStrength !== undefined && to.signalStrength < -75,
-      copy: { ip: c.ip || "", name: c.name || "", mac: c.mac || "" },
-      action: "copy:ip"
-    })
-  }
+  for (var i = 0; i < shown; i++) list.push(clientRow(items[i]))
   if (items.length > shown) {
     list.push({
       icon: ICONS.more,

@@ -4,10 +4,10 @@ import Quickshell.Io
 import qs.Commons
 import "Model.js" as Model
 
-// Polls `unifictl status -o json` on a timer for the bar icon. Device and
-// client lists are only fetched while the popup is open. A failed run keeps
-// the last good data and marks it stale instead of blanking the widget.
-// Detail data (devices, clients, logs) is fetched only for the drill-down
+// Polls `unifictl status -o json` on a timer for the bar icon, and
+// `clients list --self` for this machine's own connection. A failed status
+// run keeps the last good data and marks it stale instead of blanking the
+// widget. Detail data (devices, clients, logs) is fetched only for the drill-down
 // view that is open, so the main view costs one call per tick.
 Item {
   id: root
@@ -18,13 +18,14 @@ Item {
   property int logLines: 15
 
   property var status: null
+  property var selfClient: null
   property var devices: null
   property var clients: null
   property var logs: null
   property bool stale: false
   property string lastError: ""
   property double lastSuccessMs: 0
-  readonly property bool refreshing: statusProc.running || devicesProc.running || clientsProc.running || logsProc.running
+  readonly property bool refreshing: statusProc.running || selfProc.running || devicesProc.running || clientsProc.running || logsProc.running
 
   readonly property string health: Model.overallState(status, stale)
   readonly property int refreshIntervalSec: intSetting("refreshIntervalSec", 60, 15, 3600)
@@ -54,6 +55,7 @@ Item {
 
   function refresh(force) {
     run(statusProc, ["status"], force === true)
+    run(selfProc, ["clients", "list", "--self"], force === true)
     refreshDetails(force === true)
   }
 
@@ -117,7 +119,7 @@ Item {
     id: watchdog
     interval: 30000
     onTriggered: {
-      for (var p of [statusProc, devicesProc, clientsProc, logsProc]) if (p.running) p.running = false
+      for (var p of [statusProc, selfProc, devicesProc, clientsProc, logsProc]) if (p.running) p.running = false
     }
   }
 
@@ -137,6 +139,19 @@ Item {
         if (root.status) root.stale = true
       }
       root.maybeNotify()
+    }
+  }
+
+  // Optional: this machine may be off-site or unknown to the controller, so a
+  // failure only hides the row and never marks the widget stale.
+  Process {
+    id: selfProc
+    stdout: StdioCollector { id: selfOut; waitForEnd: true }
+    stderr: StdioCollector { id: selfErr; waitForEnd: true }
+    onExited: function(exitCode) {
+      var parsed = exitCode === 0 ? Model.parseJson(selfOut.text) : { ok: false }
+      root.selfClient = parsed.ok ? parsed.value : null
+      if (!parsed.ok) console.warn("unifictl clients list --self:", String(selfErr.text || "").trim())
     }
   }
 

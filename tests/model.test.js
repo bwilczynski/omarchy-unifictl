@@ -21,8 +21,48 @@ test("verdicts: idle is fine, warn is a warning, anything else is an error", () 
   assert.equal(Model.overallState(s("ok"), true), "stale")
 })
 
+test("grades: only good, fair and poor count", () => {
+  assert.equal(Model.grade("good"), "good")
+  assert.equal(Model.grade("poor"), "poor")
+  assert.equal(Model.grade(undefined), "")
+  assert.equal(Model.grade("bad"), "")
+})
+
+test("grade colours come from the theme, with ANSI fallbacks", () => {
+  const named = Model.gradeColors('green = "#9ece6a"\nyellow = "#e0af68"\nred = "#f7768e"\ncolor2 = "#000000"')
+  assert.deepEqual({ ...named }, { good: "#9ece6a", fair: "#e0af68", poor: "#f7768e" })
+  const ansi = Model.gradeColors('color1 = "#aa0000"\ncolor2 = "#00aa00"\ncolor3 = "#aaaa00"')
+  assert.deepEqual({ ...ansi }, { good: "#00aa00", fair: "#aaaa00", poor: "#aa0000" })
+  assert.deepEqual({ ...Model.gradeColors("") }, { good: "", fair: "", poor: "" })
+})
+
+test("client rows carry unifictl's grade for signal or link speed", () => {
+  const wifi = Model.clientRow({ name: "phone", ip: "10.0.0.2", connectionType: "wireless",
+    connectedTo: { device: { name: "AP" }, ssid: "home", signalStrength: -80, signalStrengthHealth: "poor" } })
+  assert.equal(wifi.trailing, "-80 dBm")
+  assert.equal(wifi.grade, "poor")
+  assert.equal(wifi.attention, true)
+  assert.equal(wifi.subtitle, "10.0.0.2 · home @ AP")
+
+  const wired = Model.clientRow({ name: "hue", ip: "10.0.0.3", connectionType: "wired",
+    connectedTo: { device: { name: "US 8" }, port: 6, linkSpeed: "fe", linkSpeedHealth: "fair" } })
+  assert.equal(wired.trailing, "100 Mbps")
+  assert.equal(wired.grade, "fair")
+  assert.equal(wired.attention, false)
+  assert.equal(wired.subtitle, "10.0.0.3 · US 8 port 6")
+
+  assert.equal(Model.selfRows({ items: [{ connectionType: "wired" }, { connectionType: "wireless" }] }).length, 2)
+  assert.equal(Model.selfRows({ items: [] }).length, 0)
+  assert.equal(Model.selfRows(null).length, 0)
+})
+
 test("live status, devices and clients produce rows", () => {
   const status = unifictl("status")
+  const self = unifictl("clients", "list", "--self")
+  const selfRows = Model.selfRows(self)
+  assert.equal(selfRows.length, self.items.length)
+  for (const r of selfRows) assert.ok(r.grade !== "", "self row is graded")
+  console.log("self", JSON.stringify(selfRows.map((r) => [r.title, r.subtitle, r.trailing, r.grade])))
   const devices = unifictl("devices", "list")
   const clients = unifictl("clients", "list")
 
@@ -35,7 +75,9 @@ test("live status, devices and clients produce rows", () => {
   assert.equal(rows.length, Math.min(clients.items.length, 5) + (clients.items.length > 5 ? 1 : 0))
   assert.ok(Model.tooltip(status, Model.overallState(status, false)).startsWith("UniFi: "))
 
-  for (const r of [...wans, ...Model.summaryRows(status), ...Model.deviceRows(devices), ...rows]) {
+  assert.ok(wans.some((r) => r.grade !== ""), "a connected WAN carries a latency grade")
+  assert.ok(Model.deviceRows(devices).some((r) => r.grade !== ""), "devices carry experience grades")
+  for (const r of [...wans, ...selfRows, ...Model.summaryRows(status), ...Model.deviceRows(devices), ...rows]) {
     assert.equal(typeof r.title, "string")
     assert.ok(!String(r.subtitle).includes("undefined"), r.subtitle)
   }

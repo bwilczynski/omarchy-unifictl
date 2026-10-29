@@ -22,6 +22,8 @@ CursorSurface {
   property bool attention: false
   property bool muted: false
   property string trailingIcon: ""
+  // unifictl's health grade for `trailing`: good, fair, poor or "".
+  property string grade: ""
 
   signal activated()
 
@@ -100,7 +102,7 @@ CursorSurface {
       textFormat: Text.PlainText
       visible: text !== ""
       text: row.trailing
-      color: row.panel ? row.panel.dim : Color.muted
+      color: row.panel ? row.panel.gradeColor(row.grade) : Color.muted
       font.family: row.panel ? row.panel.fontFamily : Style.font.family
       font.pixelSize: Style.font.bodySmall
       Layout.alignment: Qt.AlignVCenter

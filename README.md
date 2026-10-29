@@ -7,6 +7,10 @@ The bar icon reflects `unifictl status`: normal, amber when something needs a
 look, dimmed when the last refresh failed. Clicking it opens a compact popup:
 
 - **Internet:** each WAN with its IP, uptime, 24h availability and latency.
+- **This device:** this machine as the controller sees it
+  (`unifictl clients list --self`), one row per connection (cable and Wi-Fi
+  both show when both are up): IP, the switch port or AP/SSID it is on, and
+  its link speed or signal. Hidden when the controller doesn't know it.
 - **Site:** Devices, Wi-Fi, Wired and Alarms summaries. Each one drills down
   into a detail view:
 
@@ -14,16 +18,21 @@ look, dimmed when the last refresh failed. Clicking it opens a compact popup:
 |---|---|---|
 | Devices | `unifictl devices list` | gateway, switches, APs; offline first |
 | Wi-Fi | `unifictl clients list` | wireless clients, weakest signal first |
-| Wired | `unifictl clients list` | wired clients with switch and port |
+| Wired | `unifictl clients list` | wired clients with switch, port and link speed |
 | Alarms | `unifictl logs -r -p high` | recent high-severity events |
 
-Detail lists are fetched only when their view is open, so the bar costs one
-`unifictl status` call per refresh.
+Values unifictl grades (WAN latency, device experience, Wi-Fi signal, link
+speed) are coloured the way unifictl's tables colour them: green, yellow, red
+for good, fair, poor, taken from the theme's `colors.toml`. A poor grade
+also tints the whole row.
+
+Detail lists are fetched only when their view is open, so the bar costs
+`unifictl status` and `unifictl clients list --self` per refresh.
 
 ## Requirements
 
 - Omarchy with the Quickshell-based `omarchy-shell`
-- `unifictl` on the shell's `PATH`, configured (`unifictl config`) and able to
+- `unifictl` 0.4.3 or newer on the shell's `PATH`, configured (`unifictl config`) and able to
   reach the controller
 - If `unifictl` reads its API key through `pass`/gpg, the key must be unlockable
   from the desktop session (the bar runs without a terminal)
