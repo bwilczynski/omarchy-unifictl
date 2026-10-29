@@ -12,9 +12,10 @@ import "Model.js" as Model
 // detail view that loads its own list on demand.
 //
 // Mouse: left = popup, middle = force refresh, right = open console URL.
-// Keys: up/down move, enter or right drills in, left/esc goes back (esc on
-// the main view closes), r refresh, t open in terminal, o console,
-// c/n/m copy IP/name/MAC, / filter the open list.
+// Keys: up/down move, enter or right drills in (on a leaf row enter opens
+// its copy menu), left/esc goes back (esc on the main view closes),
+// r refresh, t open in terminal, o console, c/n/m copy IP/name/MAC,
+// d details of the selected row in a terminal, / filter the open list.
 Panel {
   id: root
   moduleName: "bwilczynski.unifictl"
@@ -66,6 +67,8 @@ Panel {
   property int cursorIndex: 0
   property string filterText: ""
   property bool filtering: false
+  // A row's copy menu has the keyboard while open.
+  property bool copyMenuOpen: false
   property string flash: ""
   property double nowMs: Date.now()
 
@@ -146,10 +149,27 @@ Panel {
   }
 
   function copyFromRow(section, index, kind) {
-    var value = section.copyValue(index, kind)
+    copyText(section.copyValue(index, kind))
+  }
+
+  function copyText(value) {
     if (value === "") return
     service.copy(value)
     showFlash("Copied " + value)
+  }
+
+  function detailsSelected() {
+    var section = currentSection()
+    if (section) openDetails(section.detailsCommand(cursorIndex))
+  }
+
+  // `unifictl … get <id>` for one row, in a floating terminal.
+  function openDetails(command) {
+    if (command !== "") runAction("term:" + command)
+  }
+
+  function restoreKeyFocus() {
+    if (opened) Qt.callLater(function() { keyCatcher.forceActiveFocus() })
   }
 
   function setView(next) {
@@ -324,7 +344,7 @@ Panel {
     PanelKeyCatcher {
       id: keyCatcher
       anchors.fill: parent
-      blocked: root.filtering
+      blocked: root.filtering || root.copyMenuOpen
       onMoveRequested: function(dx, dy) {
         if (dy !== 0) root.moveCursor(dy)
         else if (dx < 0) root.back()
@@ -341,6 +361,7 @@ Panel {
         else if (key === "c") root.copySelected("ip")
         else if (key === "n") root.copySelected("name")
         else if (key === "m") root.copySelected("mac")
+        else if (key === "d") root.detailsSelected()
         else if (t === "/" && root.view !== "") root.startFilter()
       }
 

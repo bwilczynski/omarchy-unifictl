@@ -19,7 +19,9 @@ var ICONS = {
   topology: String.fromCodePoint(0xF0645),  // md-sitemap
   more: String.fromCodePoint(0xF01D8),      // md-dots_horizontal
   chevron: String.fromCodePoint(0xF0142),   // md-chevron_right
-  back: String.fromCodePoint(0xF004D)       // md-arrow_left
+  back: String.fromCodePoint(0xF004D),      // md-arrow_left
+  copy: String.fromCodePoint(0xF018F),      // md-content_copy
+  details: String.fromCodePoint(0xF02FD)    // md-information_outline
 }
 
 // ---- verdicts -------------------------------------------------------------
@@ -185,10 +187,33 @@ function formatLinkSpeed(speed) {
 //
 // Row descriptor consumed by components/Section.qml:
 //   { icon, title, subtitle, trailing, trailingIcon, attention, muted,
-//     grade, copy: { ip, name, mac }, action }
+//     grade, copy: { ip, name, mac }, details, action }
+//
+// A leaf row has action "copy" (Enter opens its copy menu) and, when
+// unifictl can show it on its own, `details`: the `… get <id>` command to
+// run in a terminal.
 //
 // `grade` is unifictl's health grade for the trailing value ("good", "fair",
 // "poor", or "" when ungraded); the row colours that value with it.
+
+// `unifictl <noun> get <id>`, or "" without an id.
+function getCommand(noun, id) {
+  if (id === null || id === undefined || String(id) === "") return ""
+  return "unifictl " + noun + " get '" + String(id).replace(/'/g, "'\\''") + "'"
+}
+
+// Copy menu entries for a row's `copy` values, IP first, empty ones left out.
+var COPY_LABELS = { ip: "IP", mac: "MAC", name: "Name" }
+
+function copyOptions(copy) {
+  var out = []
+  if (!copy) return out
+  for (var kind of ["ip", "mac", "name"]) {
+    var value = copy[kind] === null || copy[kind] === undefined ? "" : String(copy[kind])
+    if (value !== "") out.push({ kind: kind, label: COPY_LABELS[kind], value: value })
+  }
+  return out
+}
 
 function wanRows(status) {
   var wans = rowsByArea(status, "wan")
@@ -209,7 +234,8 @@ function wanRows(status) {
       attention: verdictLevel(r.verdict) > 0 || isPoor(w.latencyHealth) || isPoor(w.availabilityHealth),
       muted: r.verdict === "idle",
       copy: { ip: w.ipAddress || "", name: w.name || "" },
-      action: "copy:ip"
+      details: getCommand("wans", w.id),
+      action: "copy"
     })
   }
   return list
@@ -329,7 +355,8 @@ function deviceRows(devices, filter) {
       grade: grade(d.experienceHealth),
       attention: !up || isPoor(d.experienceHealth),
       copy: { ip: d.ip || "", name: d.name || "", mac: d.mac || "" },
-      action: "copy:ip"
+      details: getCommand("devices", d.id),
+      action: "copy"
     })
   }
   return list
@@ -367,7 +394,8 @@ function clientRow(c) {
     grade: g,
     attention: g === "poor",
     copy: { ip: c.ip || "", name: c.name || "", mac: c.mac || "" },
-    action: "copy:ip"
+    details: getCommand("clients", c.id),
+    action: "copy"
   }
 }
 
@@ -463,7 +491,7 @@ function logRows(entries, filter) {
       subtitle: join([formatTime(e.time), e.message]),
       attention: e.severity === "veryHigh",
       copy: { ip: details.srcIp || "", name: e.message || "" },
-      action: "copy:ip"
+      action: "copy"
     })
   }
   return list

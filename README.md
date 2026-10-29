@@ -53,19 +53,22 @@ omarchy plugin enable bwilczynski.unifictl
 ## Usage
 
 **Mouse:** left-click opens the popup, middle-click forces a refresh, and
-right-click opens the console URL (if set).
+right-click opens the console URL (if set). Device, client and WAN rows have
+two buttons: copy opens a menu of the row's IP, MAC and name, and details
+runs `unifictl devices|clients|wans get <id>` in a floating terminal.
 
 **Keys in the popup:**
 
 | Key | Action |
 |---|---|
 | ↑ ↓ / `j` `k` | move |
-| Enter | activate the row: drill down, or copy the IP |
+| Enter | activate the row: drill down, or open its copy menu (↑ ↓ / `j` `k` pick, Enter copies, Esc closes) |
 | → / `l` | drill down (Site rows) |
 | ← / `h`, Esc | back to the main view (Esc on the main view closes) |
 | `r` | refresh, bypassing unifictl's cache |
 | `t` | open the current view in a terminal (`unifictl topology`, `clients list`, `logs`) |
 | `c` `n` `m` | copy the IP, name or MAC of the selected row |
+| `d` | show the selected row's details in a terminal (`unifictl … get <id>`) |
 | `/` | filter the open list (devices, clients, alarms); Enter keeps the filter, Esc clears it |
 | `o` | open the UniFi console |
 

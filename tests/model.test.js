@@ -76,6 +76,24 @@ test("filter matches every word, in any list", () => {
   for (const v of ["devices", "wifi", "wired", "alarms"]) assert.ok(Model.viewInfo(v).filterHint, v)
 })
 
+test("leaf rows offer a copy menu and a details command", () => {
+  const opts = Model.copyOptions({ ip: "10.0.0.2", name: "phone", mac: "" })
+  assert.deepEqual([...opts].map((o) => [o.label, o.value]), [["IP", "10.0.0.2"], ["Name", "phone"]])
+  assert.equal(Model.copyOptions(undefined).length, 0)
+
+  assert.equal(Model.getCommand("clients", "o'brien"), "unifictl clients get 'o'\\''brien'")
+  assert.equal(Model.getCommand("devices", ""), "")
+
+  const client = Model.clientRow({ id: "phone-1", name: "phone", connectionType: "wireless" })
+  assert.equal(client.action, "copy")
+  assert.equal(client.details, "unifictl clients get 'phone-1'")
+  const [device] = Model.deviceRows({ items: [{ id: "us-8", name: "US 8", status: "connected" }] })
+  assert.equal(device.details, "unifictl devices get 'us-8'")
+  const [alarm] = Model.logRows([{ title: "x", details: { srcIp: "1.2.3.4" } }])
+  assert.equal(alarm.action, "copy")
+  assert.equal(alarm.details, undefined)
+})
+
 test("live status, devices and clients produce rows", () => {
   const status = unifictl("status")
   const self = unifictl("clients", "list", "--self")
@@ -113,6 +131,12 @@ test("live status, devices and clients produce rows", () => {
   assert.equal(Model.detailRows("devices", data, 100, "").length, devices.items.length)
   assert.equal(Model.detailRows("alarms", data, 100, "").length, logs.value.length)
   console.log("wifi", wifi.length, "wired", wired.length, "alarms", logs.value.length)
+
+  // Every details command runs as is.
+  for (const r of [wans[0], Model.deviceRows(devices)[0], rows[0]]) {
+    assert.match(r.details, /^unifictl (wans|devices|clients) get '/)
+    execFileSync("bash", ["-c", r.details + " -o json > /dev/null"])
+  }
 
   console.log(Model.tooltip(status, Model.overallState(status, false)))
   console.log(JSON.stringify(Model.summaryRows(status).map((r) => [r.title, r.subtitle]), null, 1))
