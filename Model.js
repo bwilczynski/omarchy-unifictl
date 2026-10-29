@@ -294,8 +294,23 @@ function deviceIcon(d) {
   return ICONS.other
 }
 
-function deviceRows(devices) {
+// True when every word of `filter` appears somewhere in `fields`
+// (case-insensitive). An empty filter matches everything.
+function matches(fields, filter) {
+  var words = String(filter || "").trim().toLowerCase().split(/\s+/)
+  var hay = fields.map(function(f) { return f === null || f === undefined ? "" : String(f) }).join(" ").toLowerCase()
+  for (var i = 0; i < words.length; i++) if (words[i] !== "" && hay.indexOf(words[i]) === -1) return false
+  return true
+}
+
+function deviceMatches(d, filter) {
+  var up = d.uplink || {}
+  return matches([d.name, d.ip, d.mac, d.model, d.type, d.status, d.firmwareVersion, up.device ? up.device.name : ""], filter)
+}
+
+function deviceRows(devices, filter) {
   var items = devices && Array.isArray(devices.items) ? devices.items.slice() : []
+  items = items.filter(function(d) { return deviceMatches(d, filter) })
   items.sort(function(a, b) {
     var up = (a.status === "connected" ? 1 : 0) - (b.status === "connected" ? 1 : 0)
     if (up !== 0) return up // offline first
@@ -321,11 +336,15 @@ function deviceRows(devices) {
 }
 
 function clientMatches(c, filter) {
-  var q = String(filter || "").trim().toLowerCase()
-  if (q === "") return true
   var to = c.connectedTo || {}
-  var hay = [c.name, c.ip, c.mac, to.ssid, to.device ? to.device.name : ""].join(" ").toLowerCase()
-  return hay.indexOf(q) !== -1
+  return matches([c.name, c.ip, c.mac, to.ssid, to.device ? to.device.name : ""], filter)
+}
+
+function logMatches(e, filter) {
+  var details = e.details || {}
+  var fields = [e.title, e.event, e.message, e.category, e.subcategory, e.severity]
+  for (var k in details) fields.push(details[k])
+  return matches(fields, filter)
 }
 
 // One client: where it is attached, and the graded value that says how well
@@ -399,10 +418,14 @@ function parseJson(text) {
 // ---- drill-down views -----------------------------------------------------
 
 var VIEWS = {
-  devices: { title: "Devices", heading: "GATEWAY · SWITCHES · ACCESS POINTS", needs: "devices", terminal: "unifictl topology" },
-  wifi: { title: "Wi-Fi clients", heading: "WEAKEST SIGNAL FIRST", needs: "clients", terminal: "unifictl clients list" },
-  wired: { title: "Wired clients", heading: "CONNECTED BY CABLE", needs: "clients", terminal: "unifictl clients list" },
-  alarms: { title: "Alarms", heading: "RECENT HIGH-SEVERITY EVENTS", needs: "logs", terminal: "unifictl logs -p high" }
+  devices: { title: "Devices", heading: "GATEWAY · SWITCHES · ACCESS POINTS", needs: "devices", terminal: "unifictl topology",
+    filterHint: "Filter devices by name, IP, MAC, model" },
+  wifi: { title: "Wi-Fi clients", heading: "WEAKEST SIGNAL FIRST", needs: "clients", terminal: "unifictl clients list",
+    filterHint: "Filter clients by name, IP, MAC, SSID, AP" },
+  wired: { title: "Wired clients", heading: "CONNECTED BY CABLE", needs: "clients", terminal: "unifictl clients list",
+    filterHint: "Filter clients by name, IP, MAC, switch" },
+  alarms: { title: "Alarms", heading: "RECENT HIGH-SEVERITY EVENTS", needs: "logs", terminal: "unifictl logs -p high",
+    filterHint: "Filter alarms by title, message, IP" }
 }
 
 function viewInfo(view) {
@@ -428,8 +451,8 @@ function formatTime(iso) {
   return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()) + " " + pad(d.getHours()) + ":" + pad(d.getMinutes())
 }
 
-function logRows(entries) {
-  var items = Array.isArray(entries) ? entries : []
+function logRows(entries, filter) {
+  var items = (Array.isArray(entries) ? entries : []).filter(function(e) { return logMatches(e, filter) })
   var list = []
   for (var i = 0; i < items.length; i++) {
     var e = items[i]
@@ -447,9 +470,9 @@ function logRows(entries) {
 }
 
 function detailRows(view, data, max, filter) {
-  if (view === "devices") return deviceRows(data.devices)
+  if (view === "devices") return deviceRows(data.devices, filter)
   if (view === "wifi") return clientRows(data.clients, max, filter, "wireless")
   if (view === "wired") return clientRows(data.clients, max, filter, "wired")
-  if (view === "alarms") return logRows(data.logs)
+  if (view === "alarms") return logRows(data.logs, filter)
   return []
 }

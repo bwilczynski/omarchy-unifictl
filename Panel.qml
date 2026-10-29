@@ -14,7 +14,7 @@ import "Model.js" as Model
 // Mouse: left = popup, middle = force refresh, right = open console URL.
 // Keys: up/down move, enter or right drills in, left/esc goes back (esc on
 // the main view closes), r refresh, t open in terminal, o console,
-// c/n/m copy IP/name/MAC, / filter clients.
+// c/n/m copy IP/name/MAC, / filter the open list.
 Panel {
   id: root
   moduleName: "bwilczynski.unifictl"
@@ -64,7 +64,7 @@ Panel {
   property bool cursorActive: false
   property string cursorSection: ""
   property int cursorIndex: 0
-  property string clientFilter: ""
+  property string filterText: ""
   property bool filtering: false
   property string flash: ""
   property double nowMs: Date.now()
@@ -155,7 +155,7 @@ Panel {
   function setView(next) {
     var from = view
     if (filtering) stopFilter(false)
-    clientFilter = ""
+    filterText = ""
     view = next
     flick.contentY = 0
     if (!cursorActive) return
@@ -203,7 +203,7 @@ Panel {
 
   function stopFilter(keep) {
     filtering = false
-    if (!keep) clientFilter = ""
+    if (!keep) filterText = ""
     Qt.callLater(function() { keyCatcher.forceActiveFocus() })
   }
 
@@ -231,7 +231,7 @@ Panel {
   } else {
     if (filtering) stopFilter(false)
     view = ""
-    clientFilter = ""
+    filterText = ""
   }
 
   Service {
@@ -341,7 +341,7 @@ Panel {
         else if (key === "c") root.copySelected("ip")
         else if (key === "n") root.copySelected("name")
         else if (key === "m") root.copySelected("mac")
-        else if (t === "/" && (root.view === "wifi" || root.view === "wired")) root.startFilter()
+        else if (t === "/" && root.view !== "") root.startFilter()
       }
 
       Flickable {
@@ -494,9 +494,9 @@ Panel {
             visible: root.filtering
             width: parent.width
             foreground: root.foreground
-            placeholderText: "Filter clients by name, IP, MAC, SSID, AP"
-            text: root.clientFilter
-            onTextChanged: root.clientFilter = text
+            placeholderText: root.viewInfo ? root.viewInfo.filterHint : ""
+            text: root.filterText
+            onTextChanged: root.filterText = text
             onAccepted: root.stopFilter(true)
             Keys.onEscapePressed: root.stopFilter(false)
           }
@@ -506,18 +506,18 @@ Panel {
             visible: root.view !== "" && available
             panel: root
             sectionId: "detail"
-            heading: root.clientFilter !== "" ? "FILTER · \"" + root.clientFilter + "\""
+            heading: root.filterText !== "" ? "FILTER · \"" + root.filterText + "\""
               : (root.viewInfo ? root.viewInfo.heading : "")
             rows: root.view === "" ? [] : Model.detailRows(root.view,
               { devices: service.devices, clients: service.clients, logs: service.logs },
-              root.maxClients, root.clientFilter)
+              root.maxClients, root.filterText)
           }
 
           Text {
             visible: root.view !== "" && !detailSection.available
             width: parent.width
             textFormat: Text.PlainText
-            text: !root.detailLoaded ? "Loading…" : (root.clientFilter !== "" ? "No matches" : "Nothing to show")
+            text: !root.detailLoaded ? "Loading…" : (root.filterText !== "" ? "No matches" : "Nothing to show")
             color: root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.bodySmall

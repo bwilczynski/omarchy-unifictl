@@ -66,7 +66,7 @@ right-click opens the console URL (if set).
 | `r` | refresh, bypassing unifictl's cache |
 | `t` | open the current view in a terminal (`unifictl topology`, `clients list`, `logs`) |
 | `c` `n` `m` | copy the IP, name or MAC of the selected row |
-| `/` | filter clients (Wi-Fi and Wired views) |
+| `/` | filter the open list (devices, clients, alarms); Enter keeps the filter, Esc clears it |
 | `o` | open the UniFi console |
 
 ## Settings

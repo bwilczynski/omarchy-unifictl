@@ -56,6 +56,26 @@ test("client rows carry unifictl's grade for signal or link speed", () => {
   assert.equal(Model.selfRows(null).length, 0)
 })
 
+test("filter matches every word, in any list", () => {
+  const devices = { items: [
+    { name: "US 8", ip: "10.0.0.1", type: "switch", model: "USC8", status: "connected" },
+    { name: "UAP-01", ip: "10.0.0.2", type: "accessPoint", model: "U7PG2", status: "connected" }
+  ] }
+  assert.equal(Model.detailRows("devices", { devices }, 10, "usc8").length, 1)
+  assert.equal(Model.detailRows("devices", { devices }, 10, "uap 10.0.0.2").length, 1)
+  assert.equal(Model.detailRows("devices", { devices }, 10, "").length, 2)
+
+  const logs = [
+    { title: "Threat Detected", message: "intrusion from 10.0.0.9", category: "security", details: { dstIp: "140.82.121.3" } },
+    { title: "AP Disconnected", message: "UAP-02 lost contact", category: "device" }
+  ]
+  assert.equal(Model.detailRows("alarms", { logs }, 10, "140.82").length, 1)
+  assert.equal(Model.detailRows("alarms", { logs }, 10, "uap-02").length, 1)
+  assert.equal(Model.detailRows("alarms", { logs }, 10, "nothing").length, 0)
+
+  for (const v of ["devices", "wifi", "wired", "alarms"]) assert.ok(Model.viewInfo(v).filterHint, v)
+})
+
 test("live status, devices and clients produce rows", () => {
   const status = unifictl("status")
   const self = unifictl("clients", "list", "--self")
