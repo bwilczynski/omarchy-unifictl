@@ -197,6 +197,7 @@ Panel {
 
   function startFilter() {
     filtering = true
+    flick.contentY = 0
     Qt.callLater(function() { filterField.forceActiveFocus(); filterField.selectAll() })
   }
 
@@ -487,6 +488,19 @@ Panel {
             }
           }
 
+          // Top of the list, so it stays on screen however long the list is.
+          TextField {
+            id: filterField
+            visible: root.filtering
+            width: parent.width
+            foreground: root.foreground
+            placeholderText: "Filter clients by name, IP, MAC, SSID, AP"
+            text: root.clientFilter
+            onTextChanged: root.clientFilter = text
+            onAccepted: root.stopFilter(true)
+            Keys.onEscapePressed: root.stopFilter(false)
+          }
+
           Section {
             id: detailSection
             visible: root.view !== "" && available
@@ -508,18 +522,6 @@ Panel {
             font.family: root.fontFamily
             font.pixelSize: Style.font.bodySmall
             horizontalAlignment: Text.AlignHCenter
-          }
-
-          TextField {
-            id: filterField
-            visible: root.filtering
-            width: parent.width
-            foreground: root.foreground
-            placeholderText: "Filter clients by name, IP, MAC, SSID, AP"
-            text: root.clientFilter
-            onTextChanged: root.clientFilter = text
-            onAccepted: root.stopFilter(true)
-            Keys.onEscapePressed: root.stopFilter(false)
           }
 
           Text {
