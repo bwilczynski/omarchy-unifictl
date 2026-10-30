@@ -49,7 +49,7 @@
       {
         "key": "maxClients",
         "type": "integer",
-        "label": "Rows per drill-down view (clients, alarms, applications)",
+        "label": "Rows per drill-down view (clients, alarms, applications, AP clients)",
         "min": 1,
         "max": 50,
         "defaultValue": 10

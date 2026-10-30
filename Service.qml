@@ -10,7 +10,8 @@ import "Model.js" as Model
 // run keeps the last good data and marks it stale instead of blanking the
 // widget. Detail data (devices, clients, logs) is fetched only for the drill-down
 // view that is open, so the main view costs three quick calls per tick. The
-// client view ("client:<id>") loads `clients get` and `clients traffic <id>`.
+// client view ("client:<id>") loads `clients get` and `clients traffic <id>`,
+// the device view ("device:<id>") `devices get <id>`.
 Item {
   id: root
 
@@ -30,10 +31,12 @@ Item {
   // carry the id, so the panel can tell them from a previous client's.
   property var client: null
   property var clientTraffic: null
+  // The device view's `devices get <id>`, which carries its id too.
+  property var device: null
   property bool stale: false
   property string lastError: ""
   property double lastSuccessMs: 0
-  readonly property var procs: [statusProc, selfProc, trafficProc, devicesProc, clientsProc, logsProc, clientProc, clientTrafficProc]
+  readonly property var procs: [statusProc, selfProc, trafficProc, devicesProc, clientsProc, logsProc, clientProc, clientTrafficProc, deviceProc]
   readonly property bool refreshing: procs.some(function(p) { return p.running })
 
   readonly property string health: Model.overallState(status, stale)
@@ -79,14 +82,15 @@ Item {
       run(clientProc, ["clients", "get", info.clientId], force)
       run(clientTrafficProc, ["clients", "traffic", info.clientId], force)
     }
+    else if (info.needs === "device") run(deviceProc, ["devices", "get", info.deviceId], force)
   }
 
-  // While a fetch for one client ran, opening another client skipped its
-  // own fetch: when the finished one was for a different client, fetch again.
-  // `proc.command` is ["unifictl", "clients", "get"|"traffic", <id>, …].
-  function refetchIfOtherClient(proc) {
+  // While a fetch for one client or device ran, opening another skipped its
+  // own fetch: when the finished one was for a different item, fetch again.
+  // `proc.command` is ["unifictl", "clients"|"devices", "get"|"traffic", <id>, …].
+  function refetchIfOtherItem(proc, needs) {
     var info = Model.viewInfo(view)
-    if (info && info.needs === "client" && proc.command[3] !== info.clientId) refreshDetails(false)
+    if (info && info.needs === needs && proc.command[3] !== info.id) refreshDetails(false)
   }
 
   onViewChanged: refreshDetails(false)
@@ -230,7 +234,7 @@ Item {
       var parsed = exitCode === 0 ? Model.parseJson(clientOut.text) : { ok: false }
       if (parsed.ok) root.client = parsed.value
       else root.failed(clientErr.text, "unifictl clients get failed")
-      root.refetchIfOtherClient(clientProc)
+      root.refetchIfOtherItem(clientProc, "client")
     }
   }
 
@@ -242,7 +246,19 @@ Item {
       var parsed = exitCode === 0 ? Model.parseJson(clientTrafficOut.text) : { ok: false }
       if (parsed.ok) root.clientTraffic = parsed.value
       else root.failed(clientTrafficErr.text, "unifictl clients traffic failed")
-      root.refetchIfOtherClient(clientTrafficProc)
+      root.refetchIfOtherItem(clientTrafficProc, "client")
+    }
+  }
+
+  Process {
+    id: deviceProc
+    stdout: StdioCollector { id: deviceOut; waitForEnd: true }
+    stderr: StdioCollector { id: deviceErr; waitForEnd: true }
+    onExited: function(exitCode) {
+      var parsed = exitCode === 0 ? Model.parseJson(deviceOut.text) : { ok: false }
+      if (parsed.ok) root.device = parsed.value
+      else root.failed(deviceErr.text, "unifictl devices get failed")
+      root.refetchIfOtherItem(deviceProc, "device")
     }
   }
 }

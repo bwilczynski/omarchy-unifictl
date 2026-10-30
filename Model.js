@@ -208,7 +208,7 @@ function gradeColors(colorsToml) {
   }
 }
 
-var LINK_SPEEDS = { e: "10 Mbps", fe: "100 Mbps", gbe1: "1 GbE", gbe2p5: "2.5 GbE", gbe5: "5 GbE", gbe10: "10 GbE" }
+var LINK_SPEEDS = { e: "10 Mbps", fe: "100 Mbps", gbe1: "1 GbE", gbe2p5: "2.5 GbE", gbe2_5: "2.5 GbE", gbe5: "5 GbE", gbe10: "10 GbE" }
 
 function formatLinkSpeed(speed) {
   if (!speed) return ""
@@ -223,8 +223,8 @@ function formatLinkSpeed(speed) {
 //
 // A leaf row has action "copy" (Enter opens its copy menu) and, when
 // unifictl can show it on its own, `details`: the `… get <id>` command to
-// run in a terminal. A client row instead opens the client view: both its
-// action and its `details` are "view:client:<id>".
+// run in a terminal. A client or device row instead opens its own view: both
+// its action and its `details` are "view:client:<id>" or "view:device:<id>".
 //
 // `grade` is unifictl's health grade for the trailing value ("good", "fair",
 // "poor", or "" when ungraded); the row colours that value with it.
@@ -372,6 +372,10 @@ function deviceMatches(d, filter) {
   return matches([d.name, d.ip, d.mac, d.model, d.type, d.status, d.firmwareVersion, up.device ? up.device.name : ""], filter)
 }
 
+function deviceAction(id) {
+  return id === null || id === undefined || String(id) === "" ? "" : "view:device:" + id
+}
+
 function deviceRows(devices, filter) {
   var items = devices && Array.isArray(devices.items) ? devices.items.slice() : []
   items = items.filter(function(d) { return deviceMatches(d, filter) })
@@ -393,8 +397,8 @@ function deviceRows(devices, filter) {
       grade: grade(d.experienceHealth),
       attention: !up || isPoor(d.experienceHealth),
       copy: { ip: d.ip || "", name: d.name || "", mac: d.mac || "" },
-      details: getCommand("devices", d.id),
-      action: "copy"
+      details: deviceAction(d.id),
+      action: deviceAction(d.id) || "copy"
     })
   }
   return list
@@ -427,7 +431,11 @@ function clientLink(c) {
 }
 
 function clientAction(c) {
-  return c.id === null || c.id === undefined || String(c.id) === "" ? "" : "view:client:" + c.id
+  return clientActionFor(c.id)
+}
+
+function clientActionFor(id) {
+  return id === null || id === undefined || String(id) === "" ? "" : "view:client:" + id
 }
 
 function clientRow(c) {
@@ -552,6 +560,187 @@ function appRows(traffic, id, max, filter) {
   return list
 }
 
+// ---- device view ------------------------------------------------------------
+
+var DEVICE_TYPES = { gateway: "gateway", switch: "switch", accessPoint: "access point" }
+
+// "SWITCH · CONNECTED" for the top of the device view.
+function deviceHeading(d) {
+  if (!d) return ""
+  return join([DEVICE_TYPES[d.type] || d.type, d.status]).toUpperCase()
+}
+
+// The top of the device view, from `unifictl devices get <id>`: addresses
+// and model, what it hangs off (uplink, or the WANs of a gateway), its
+// current rate and, for an access point, its radios.
+function deviceInfoRows(d) {
+  if (!d) return []
+  var copy = { ip: d.ip || "", name: d.name || "", mac: d.mac || "" }
+  var list = [{
+    icon: deviceIcon(d),
+    title: d.ip || d.mac || d.name || "",
+    subtitle: join([d.ip ? d.mac : "", d.model, d.firmwareVersion ? "firmware " + d.firmwareVersion : ""]),
+    trailing: d.experience !== undefined && d.experience !== null ? d.experience + "%" : "",
+    grade: grade(d.experienceHealth),
+    attention: d.status !== "connected" || isPoor(d.experienceHealth),
+    copy: copy,
+    action: "copy"
+  }]
+  var up = d.uplink
+  if (up && up.device) {
+    var open = deviceAction(up.device.id)
+    list.push({
+      icon: ICONS.ethernet,
+      title: join([up.device.name, up.port !== undefined && up.port !== null ? "port " + up.port : ""]),
+      subtitle: join(["Uplink", up.maxLinkSpeed && up.maxLinkSpeed !== up.linkSpeed ? "max " + formatLinkSpeed(up.maxLinkSpeed) : "",
+        up.fullDuplex === false ? "half duplex" : ""]),
+      trailing: formatLinkSpeed(up.linkSpeed),
+      grade: grade(up.linkSpeedHealth),
+      attention: isPoor(up.linkSpeedHealth),
+      copy: { name: up.device.name || "" },
+      details: open,
+      action: open !== "" ? open : "copy"
+    })
+  }
+  var wans = Array.isArray(d.wans) ? d.wans : []
+  for (var i = 0; i < wans.length; i++) {
+    list.push({
+      icon: ICONS.internet,
+      title: wans[i].name || String(wans[i].id),
+      subtitle: "WAN",
+      copy: { name: wans[i].name || "" },
+      details: getCommand("wans", wans[i].id),
+      action: "copy"
+    })
+  }
+  var rate = d.traffic ? downUp(d.traffic.rxBytesPerSec, d.traffic.txBytesPerSec, formatRate, "  ") : ""
+  if (rate !== "") {
+    list.push({
+      icon: ICONS.traffic,
+      title: rate,
+      subtitle: join(["Right now", d.uptime ? "up " + formatDuration(d.uptime) : ""]),
+      copy: copy,
+      action: "copy"
+    })
+  }
+  var radios = Array.isArray(d.radios) ? d.radios : []
+  for (var r = 0; r < radios.length; r++) list.push(radioRow(radios[r]))
+  return list
+}
+
+function radioRow(r) {
+  var pct = function(v, label) { return v === null || v === undefined ? "" : label + " " + v + "%" }
+  var poor = isPoor(r.utilisationHealth) || isPoor(r.interferenceHealth) || isPoor(r.retriesHealth) || isPoor(r.satisfactionHealth)
+  return {
+    icon: ICONS.wifi,
+    title: join([r.band, r.channel ? "ch " + r.channel : "", r.width ? r.width + " MHz" : ""]),
+    subtitle: join([r.clients !== undefined && r.clients !== null ? r.clients + (r.clients === 1 ? " client" : " clients") : "",
+      pct(r.utilisation, "util"), pct(r.interference, "interference"), pct(r.retries, "retries"),
+      r.txPower ? r.txPower + " dBm" : ""]),
+    trailing: r.satisfaction !== null && r.satisfaction !== undefined ? r.satisfaction + "%" : "",
+    grade: grade(r.satisfactionHealth),
+    attention: poor,
+    action: ""
+  }
+}
+
+// `unifictl devices get <id>` for the device on screen; the last fetch may
+// still belong to the device viewed before.
+function viewedDevice(device, id) {
+  return device && device.id === id ? device : null
+}
+
+function vlanLabel(p) {
+  var v = p.vlanConfig || {}
+  var native = v.nativeVlan ? v.nativeVlan.name || ("VLAN " + v.nativeVlan.vlanId) : ""
+  return v.mode === "trunk" ? join([native, "trunk"]) : native
+}
+
+function portRow(p) {
+  var to = p.connectedTo || null
+  var up = p.state === "up"
+  var open = !to ? "" : to.kind === "device" ? deviceAction(to.id) : to.kind === "client" ? clientActionFor(to.id) : ""
+  var rate = p.traffic && up ? downUp(p.traffic.rxBytesPerSec, p.traffic.txBytesPerSec, formatRate, "  ") : ""
+  return {
+    icon: to && to.kind === "device" ? ICONS.switch : ICONS.ethernet,
+    title: join(["Port " + p.number, to ? to.name || to.id : ""]),
+    subtitle: join([up ? "" : p.state, vlanLabel(p), p.poePowerWatts ? "PoE " + Number(p.poePowerWatts).toFixed(1) + " W" : "", rate]),
+    trailing: up ? formatLinkSpeed(p.linkSpeed) : "",
+    muted: !up,
+    copy: to ? { name: to.name || "" } : null,
+    details: open,
+    action: open !== "" ? open : (to ? "copy" : "")
+  }
+}
+
+function portMatches(p, filter) {
+  var to = p.connectedTo || {}
+  return matches(["port " + p.number, to.name, p.state, vlanLabel(p), formatLinkSpeed(p.linkSpeed), p.poeMode ? "poe" : ""], filter)
+}
+
+function apClientRow(c) {
+  var cl = c.client || {}
+  var open = clientActionFor(cl.id)
+  var g = grade(c.signalStrengthHealth)
+  return {
+    icon: ICONS.wifi,
+    title: cl.name || String(cl.id || ""),
+    subtitle: c.ssid || "",
+    trailing: c.signalStrength !== undefined && c.signalStrength !== null ? c.signalStrength + " dBm" : "",
+    grade: g,
+    attention: g === "poor",
+    copy: { name: cl.name || "" },
+    details: open,
+    action: open !== "" ? open : "copy"
+  }
+}
+
+// The device view's list: a switch's or gateway's ports in order, an access
+// point's clients weakest signal first. Rows for what is plugged in or
+// associated open that device's or client's view.
+function deviceListRows(device, id, max, filter) {
+  var d = viewedDevice(device, id)
+  if (!d) return []
+  var ports = (Array.isArray(d.ports) ? d.ports.slice() : []).filter(function(p) { return portMatches(p, filter) })
+  ports.sort(function(a, b) { return a.number - b.number })
+  var list = ports.map(portRow)
+  var clients = (Array.isArray(d.connectedClients) ? d.connectedClients.slice() : []).filter(function(c) {
+    return matches([c.client ? c.client.name : "", c.ssid], filter)
+  })
+  clients.sort(function(a, b) {
+    var sa = a.signalStrength !== undefined && a.signalStrength !== null ? a.signalStrength : 0
+    var sb = b.signalStrength !== undefined && b.signalStrength !== null ? b.signalStrength : 0
+    return sa !== sb ? sa - sb : String(a.client ? a.client.name : "").localeCompare(String(b.client ? b.client.name : ""))
+  })
+  var shown = Math.min(clients.length, max)
+  for (var i = 0; i < shown; i++) list.push(apClientRow(clients[i]))
+  if (clients.length > shown) {
+    list.push({
+      icon: ICONS.more,
+      title: (clients.length - shown) + " more",
+      subtitle: "Open the device in a terminal",
+      muted: true,
+      action: "term:" + getCommand("devices", id)
+    })
+  }
+  return list
+}
+
+// "PORTS · 6/8 UP", "CLIENTS · 4", or both for a device that has both.
+function deviceListHeading(device, id) {
+  var d = viewedDevice(device, id)
+  if (!d) return ""
+  var parts = []
+  var ports = Array.isArray(d.ports) ? d.ports : []
+  if (ports.length > 0) {
+    var upCount = ports.filter(function(p) { return p.state === "up" }).length
+    parts.push("PORTS · " + upCount + "/" + ports.length + " UP")
+  }
+  var clients = Array.isArray(d.connectedClients) ? d.connectedClients : []
+  if (clients.length > 0 || d.type === "accessPoint") parts.push("CLIENTS · " + (d.numClients !== undefined ? d.numClients : clients.length))
+  return parts.join(" · ")
+}
+
 function clientRows(clients, max, filter, connectionType) {
   var items = clients && Array.isArray(clients.items) ? clients.items.slice() : []
   items = items.filter(function(c) {
@@ -612,13 +801,37 @@ function isClientView(view) {
 function clientView(view) {
   var id = String(view).slice(CLIENT_VIEW.length)
   if (id === "") return null
-  return { title: "Client", heading: "TRAFFIC · 24H", needs: "client", clientId: id,
+  return { title: "Client", heading: "TRAFFIC · 24H", needs: "client", clientId: id, id: id,
     terminal: getCommand("clients", id) + "; " + quotedCommand("unifictl clients traffic", id),
     filterHint: "Filter applications by name, category" }
 }
 
+// A device view is "device:<id>": `unifictl devices get` on top, its ports
+// or Wi-Fi clients below. It opens from device rows and from ports and
+// uplinks that lead to another device.
+var DEVICE_VIEW = "device:"
+
+function isDeviceView(view) {
+  return String(view || "").indexOf(DEVICE_VIEW) === 0
+}
+
+function deviceView(view) {
+  var id = String(view).slice(DEVICE_VIEW.length)
+  if (id === "") return null
+  return { title: "Device", heading: "", needs: "device", deviceId: id, id: id,
+    terminal: getCommand("devices", id),
+    filterHint: "Filter by port, name, VLAN, SSID" }
+}
+
+// One client or device on screen, rather than a list: these stack, so back
+// walks the trail of items opened from one another.
+function isItemView(view) {
+  return isClientView(view) || isDeviceView(view)
+}
+
 function viewInfo(view) {
   if (isClientView(view)) return clientView(view)
+  if (isDeviceView(view)) return deviceView(view)
   return VIEWS[view] || null
 }
 
@@ -666,5 +879,6 @@ function detailRows(view, data, max, filter) {
   if (view === "alarms") return logRows(data.logs, filter)
   var info = viewInfo(view)
   if (info && info.needs === "client") return appRows(data.clientTraffic, info.clientId, max, filter)
+  if (info && info.needs === "device") return deviceListRows(data.device, info.deviceId, max, filter)
   return []
 }

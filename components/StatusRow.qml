@@ -8,7 +8,7 @@ import "../Model.js" as Model
 
 // One keyboard-and-mouse navigable row: glyph, title over subtitle, an
 // optional trailing value, and for leaf rows a copy button (menu of IP, MAC,
-// name) and a details button (the client view, or `unifictl … get` in a
+// name) and a details button (the client or device view, or `unifictl … get` in a
 // terminal). Follows the CursorSurface contract — visuals come
 // from `hasCursor`, and hovering reports back to the panel instead of
 // painting its own highlight.

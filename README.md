@@ -28,6 +28,15 @@ upload rate (`unifictl clients get <id>`), and its internet traffic over the
 last 24h by application, heaviest first (`unifictl clients traffic <id>`).
 Back returns to the list and row you opened it from.
 
+Opening any device (Devices list, or an uplink or port that leads to one)
+shows the **device view** from `unifictl devices get <id>`: its IP, MAC,
+model and firmware, its uplink (or a gateway's WANs), its current rate, and
+for an access point its radios. Below it, a switch or gateway lists its
+ports (what is plugged in, VLAN, PoE, rate), and an access point its Wi-Fi
+clients, weakest signal first. A port or client row opens the device or
+client on the other end; Back walks the trail you followed, one step at a
+time.
+
 Values unifictl grades (WAN latency, device experience, Wi-Fi signal, link
 speed) are coloured the way unifictl's tables colour them: green, yellow, red
 for good, fair, poor, taken from the theme's `colors.toml`. A poor grade
@@ -63,22 +72,22 @@ omarchy plugin enable bwilczynski.unifictl
 **Mouse:** left-click opens the popup, middle-click forces a refresh, and
 right-click opens the console URL (if set). Device, client and WAN rows have
 two buttons: copy opens a menu of the row's IP, MAC and name, and details
-opens the client view for a client, or runs `unifictl devices|wans get <id>`
-in a floating terminal. Clicking a client row opens the client view too.
+opens the client or device view, or runs `unifictl wans get <id>` in a
+floating terminal. Clicking a client or device row opens its view too.
 
 **Keys in the popup:**
 
 | Key | Action |
 |---|---|
 | ↑ ↓ / `j` `k` | move |
-| Enter | activate the row: drill down, open a client, or open its copy menu (↑ ↓ / `j` `k` pick, Enter copies, Esc closes) |
-| → / `l` | drill down (Site rows) or open a client |
-| ← / `h`, Esc | back: from a client to its list, from a list to the main view (Esc on the main view closes) |
+| Enter | activate the row: drill down, open a client or device, or open its copy menu (↑ ↓ / `j` `k` pick, Enter copies, Esc closes) |
+| → / `l` | drill down (Site rows) or open a client or device |
+| ← / `h`, Esc | back: one step along the clients and devices you opened, then to the list, then the main view (Esc on the main view closes) |
 | `r` | refresh, bypassing unifictl's cache |
-| `t` | open the current view in a terminal (`unifictl topology`, `clients list`, `logs`, `clients get` + `clients traffic`) |
+| `t` | open the current view in a terminal (`unifictl topology`, `clients list`, `logs`, `clients get` + `clients traffic`, `devices get`) |
 | `c` `n` `m` | copy the IP, name or MAC of the selected row |
-| `d` | show the selected row's details: the client view for a client, else `unifictl … get <id>` in a terminal |
-| `/` | filter the open list (devices, clients, alarms, a client's applications); Enter keeps the filter, Esc clears it |
+| `d` | show the selected row's details: the client or device view, else `unifictl … get <id>` in a terminal |
+| `/` | filter the open list (devices, clients, alarms, a client's applications, a device's ports or clients); Enter keeps the filter, Esc clears it |
 | `o` | open the UniFi console |
 
 ## Settings
@@ -98,7 +107,8 @@ Edit them from the Omarchy bar settings, or in this widget's entry in
 
 ```sh
 omarchy-shell bwilczynski.unifictl toggle        # open, close, show, hide
-omarchy-shell bwilczynski.unifictl view wifi     # open straight into a view: devices, wifi, wired, alarms
+omarchy-shell bwilczynski.unifictl view wifi     # open straight into a view: devices, wifi, wired, alarms,
+                                                 # client:<id>, device:<id>
 omarchy-shell bwilczynski.unifictl refresh
 omarchy-shell bwilczynski.unifictl health        # loading | ok | warning | error | stale
 omarchy-shell bwilczynski.unifictl status        # last `unifictl status` JSON

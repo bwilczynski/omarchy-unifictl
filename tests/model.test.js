@@ -106,7 +106,8 @@ test("leaf rows offer a copy menu and a details command", () => {
   assert.equal(Model.getCommand("devices", ""), "")
 
   const [device] = Model.deviceRows({ items: [{ id: "us-8", name: "US 8", status: "connected" }] })
-  assert.equal(device.details, "unifictl devices get 'us-8'")
+  assert.equal(device.details, "view:device:us-8")
+  assert.equal(device.action, "view:device:us-8")
   const [alarm] = Model.logRows([{ title: "x", details: { srcIp: "1.2.3.4" } }])
   assert.equal(alarm.action, "copy")
   assert.equal(alarm.details, undefined)
@@ -151,8 +152,8 @@ liveTest("live status, devices and clients produce rows", () => {
   console.log("wifi", wifi.length, "wired", wired.length, "alarms", logs.value.length)
 
   // Every details command runs as is.
-  for (const r of [wans[0], Model.deviceRows(devices)[0]]) {
-    assert.match(r.details, /^unifictl (wans|devices) get '/)
+  for (const r of [wans[0]]) {
+    assert.match(r.details, /^unifictl wans get '/)
     execFileSync("bash", ["-c", r.details + " -o json > /dev/null"])
   }
 
@@ -254,6 +255,92 @@ liveTest("live client view and traffic", () => {
   for (const r of [...info, ...apps, ...selfRows]) assert.ok(!/undefined|NaN/.test(r.title + r.subtitle + (r.trailing || "")), r.title + " " + r.subtitle)
   console.log(JSON.stringify(info.map((r) => [r.title, r.subtitle, r.trailing])), apps.length, "apps")
   execFileSync("bash", ["-c", Model.viewInfo("client:" + id).terminal.replace(/;/g, " -o json >/dev/null;") + " -o json >/dev/null"])
+})
+
+test("device view: info rows, ports and AP clients from devices get", () => {
+  const info = Model.viewInfo("device:us-8")
+  assert.equal(info.needs, "device")
+  assert.equal(info.deviceId, "us-8")
+  assert.equal(info.terminal, "unifictl devices get 'us-8'")
+  assert.equal(Model.viewInfo("device:"), null)
+  assert.equal(Model.isItemView("device:x"), true)
+  assert.equal(Model.isItemView("client:x"), true)
+  assert.equal(Model.isItemView("devices"), false)
+
+  const sw = { id: "us-8", name: "US 8", mac: "e0:63", ip: "192.168.1.44", type: "switch", status: "connected",
+    model: "USC8", firmwareVersion: "7.5.15", uptime: 910119, experience: 95, experienceHealth: "good",
+    traffic: { rxBytesPerSec: 437, txBytesPerSec: 2048 },
+    uplink: { device: { kind: "device", id: "us-8-60w", name: "US 8 60W" }, port: 7, linkSpeed: "gbe1", maxLinkSpeed: "gbe1", fullDuplex: true, linkSpeedHealth: "good" },
+    ports: [
+      { number: 2, state: "down", vlanConfig: { mode: "access", nativeVlan: { name: "LAN-INT", vlanId: 10 } } },
+      { number: 1, state: "up", linkSpeed: "gbe1", vlanConfig: { mode: "trunk", nativeVlan: { name: "LAN-MGMT", vlanId: 1 } },
+        traffic: { rxBytesPerSec: 1024, txBytesPerSec: 512 }, connectedTo: { kind: "device", id: "us-8-60w", name: "US 8 60W" } },
+      { number: 3, state: "up", linkSpeed: "gbe2_5", poePowerWatts: 3.02, vlanConfig: { mode: "access", nativeVlan: { name: "LAN-INT", vlanId: 10 } },
+        connectedTo: { kind: "client", id: "nas", name: "NAS" } },
+      { number: 4, state: "up", linkSpeed: "fe" }
+    ] }
+  const rows = Model.deviceInfoRows(sw)
+  assert.deepEqual([...rows].map((r) => r.title), ["192.168.1.44", "US 8 60W · port 7", "↓ 437 B/s  ↑ 2.0 KB/s"])
+  assert.equal(rows[0].subtitle, "e0:63 · USC8 · firmware 7.5.15")
+  assert.equal(rows[0].trailing, "95%")
+  assert.equal(rows[1].action, "view:device:us-8-60w")
+  assert.equal(rows[1].trailing, "1 GbE")
+  assert.equal(rows[2].subtitle, "Right now · up 10d 12h")
+  assert.equal(Model.deviceHeading(sw), "SWITCH · CONNECTED")
+  assert.equal(Model.deviceInfoRows(null).length, 0)
+
+  const data = { device: sw }
+  const ports = Model.detailRows("device:us-8", data, 10, "")
+  assert.deepEqual([...ports].map((r) => r.title), ["Port 1 · US 8 60W", "Port 2", "Port 3 · NAS", "Port 4"])
+  assert.equal(ports[0].action, "view:device:us-8-60w")
+  assert.equal(ports[0].subtitle, "LAN-MGMT · trunk · ↓ 1.0 KB/s  ↑ 512 B/s")
+  assert.equal(ports[1].muted, true)
+  assert.equal(ports[1].subtitle, "down · LAN-INT")
+  assert.equal(ports[2].action, "view:client:nas")
+  assert.equal(ports[2].trailing, "2.5 GbE")
+  assert.equal(ports[2].subtitle, "LAN-INT · PoE 3.0 W")
+  assert.equal(ports[3].action, "", "nothing known on the port")
+  assert.equal(Model.detailRows("device:us-8", data, 10, "nas").length, 1)
+  assert.equal(Model.detailRows("device:other", data, 10, "").length, 0, "stale device is ignored")
+  assert.equal(Model.deviceListHeading(sw, "us-8"), "PORTS · 3/4 UP")
+
+  const gw = { id: "gw", name: "GW", type: "gateway", status: "connected", wans: [{ id: "internet-1", name: "Internet 1" }] }
+  const gwRows = Model.deviceInfoRows(gw)
+  assert.equal(gwRows[1].title, "Internet 1")
+  assert.equal(gwRows[1].details, "unifictl wans get 'internet-1'")
+
+  const ap = { id: "uap", name: "UAP", type: "accessPoint", status: "connected", numClients: 3,
+    radios: [{ band: "5G", channel: 48, width: 80, txPower: 20, utilisation: 2, interference: 0, retries: 8.1, clients: 3,
+      satisfaction: 97, satisfactionHealth: "good", retriesHealth: "poor" }],
+    connectedClients: [
+      { client: { kind: "client", id: "a", name: "A" }, ssid: "home", signalStrength: -40, signalStrengthHealth: "good" },
+      { client: { kind: "client", id: "b", name: "B" }, ssid: "home", signalStrength: -75, signalStrengthHealth: "poor" },
+      { client: { kind: "client", id: "c", name: "C" }, ssid: "iot", signalStrength: -60, signalStrengthHealth: "fair" }
+    ] }
+  const radio = Model.deviceInfoRows(ap).pop()
+  assert.equal(radio.title, "5G · ch 48 · 80 MHz")
+  assert.equal(radio.subtitle, "3 clients · util 2% · interference 0% · retries 8.1% · 20 dBm")
+  assert.equal(radio.trailing, "97%")
+  assert.equal(radio.attention, true)
+  const clients = Model.deviceListRows(ap, "uap", 2, "")
+  assert.deepEqual([...clients].map((r) => r.title), ["B", "C", "1 more"], "weakest first, capped")
+  assert.equal(clients[0].action, "view:client:b")
+  assert.equal(clients[2].action, "term:unifictl devices get 'uap'")
+  assert.equal(Model.deviceListRows(ap, "uap", 10, "iot").length, 1)
+  assert.equal(Model.deviceListHeading(ap, "uap"), "CLIENTS · 3")
+  assert.equal(Model.deviceHeading(ap), "ACCESS POINT · CONNECTED")
+})
+
+liveTest("live device view for every device", () => {
+  const devices = unifictl("devices", "list")
+  for (const { id } of devices.items) {
+    const d = unifictl("devices", "get", id)
+    const rows = [...Model.deviceInfoRows(d), ...Model.deviceListRows(d, id, 100, "")]
+    assert.ok(rows.length >= 2, id)
+    for (const r of rows) assert.ok(!/undefined|NaN|null/.test(r.title + r.subtitle + (r.trailing || "")), id + ": " + r.title + " " + r.subtitle)
+    for (const r of rows) if (r.action.startsWith("view:")) assert.ok(Model.viewInfo(r.action.slice(5)), r.action)
+    console.log(id, Model.deviceHeading(d), "|", Model.deviceListHeading(d, id), "|", rows.length, "rows")
+  }
 })
 
 test("hero: controller name, falling back to UniFi", () => {

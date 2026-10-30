@@ -11,12 +11,14 @@ import "Model.js" as Model
 // `unifictl status`; Devices / Wi-Fi / Wired / Alarms rows drill down into a
 // detail view that loads its own list on demand. A client row (This device,
 // Wi-Fi, Wired) opens the client view: `clients get` and its traffic by app.
+// A device row opens the device view: `devices get` with its ports or Wi-Fi
+// clients, each of which opens the device or client on the other end.
 //
 // Mouse: left = popup, middle = force refresh, right = open console URL.
 // Keys: up/down move, enter or right drills in (on a leaf row enter opens
 // its copy menu), left/esc goes back (esc on the main view closes),
 // r refresh, t open in terminal, o console, c/n/m copy IP/name/MAC,
-// d details of the selected row (client view, or a terminal), / filter the
+// d details of the selected row (client or device view, or a terminal), / filter the
 // open list.
 Panel {
   id: root
@@ -58,19 +60,24 @@ Panel {
   readonly property int maxClients: Math.max(1, parseInt(setting("maxClients", 10), 10) || 10)
   readonly property string barLabelMode: String(setting("barLabel", "none"))
 
-  // "" = main view; otherwise a key of Model.VIEWS, or "client:<id>".
+  // "" = main view; otherwise a key of Model.VIEWS, "client:<id>" or
+  // "device:<id>".
   property string view: ""
   readonly property var viewInfo: Model.viewInfo(view)
   readonly property bool clientView: Model.isClientView(view)
+  readonly property bool deviceView: Model.isDeviceView(view)
   // The client view's `clients get`, once it is for the client on screen.
   readonly property var viewClient: clientView && service.client && viewInfo && service.client.id === viewInfo.clientId ? service.client : null
+  // The device view's `devices get`, once it is for the device on screen.
+  readonly property var viewDevice: deviceView && viewInfo ? Model.viewedDevice(service.device, viewInfo.deviceId) : null
   readonly property bool detailLoaded: !viewInfo || (viewInfo.needs === "devices" ? service.devices !== null
     : viewInfo.needs === "clients" ? service.clients !== null
     : viewInfo.needs === "client" ? Model.clientTraffic(service.clientTraffic, viewInfo.clientId) !== null
+    : viewInfo.needs === "device" ? viewDevice !== null
     : service.logs !== null)
-  // Where back from the client view lands: the list, row and filter it was
-  // opened from. { view, section, index, filter }
-  property var returnTo: null
+  // Where back from a client or device view lands: the views, rows and
+  // filters it was reached through, latest last. [{ view, section, index, filter }]
+  property var trail: []
 
   property bool cursorActive: false
   property string cursorSection: ""
@@ -96,7 +103,8 @@ Panel {
 
   function navigableSections() {
     var all = view === "" ? [wanSection, selfSection, summarySection]
-      : clientView ? [clientSection, detailSection] : [detailSection]
+      : clientView ? [clientSection, detailSection]
+      : deviceView ? [deviceSection, detailSection] : [detailSection]
     return all.filter(function(s) { return s.available })
   }
 
@@ -174,7 +182,7 @@ Panel {
     if (section) openDetails(section.detailsCommand(cursorIndex))
   }
 
-  // A row's details: "view:client:<id>" opens the client view, anything
+  // A row's details: "view:client:<id>" or "view:device:<id>" opens that view, anything
   // else is `unifictl … get <id>` for a floating terminal.
   function openDetails(command) {
     if (command.indexOf("view:") === 0) runAction(command)
@@ -185,18 +193,23 @@ Panel {
     if (opened) Qt.callLater(function() { keyCatcher.forceActiveFocus() })
   }
 
+  // Opening a client or device remembers where it was opened from, so back
+  // can return there; opening a list or the main view starts over.
   function setView(next) {
+    var here = { view: view, section: cursorSection, index: cursorIndex, filter: filterText }
+    trail = Model.isItemView(next) ? trail.concat([here]) : []
+    showView(next)
+  }
+
+  function showView(next) {
     var from = view
-    var here = { view: from, section: cursorSection, index: cursorIndex, filter: filterText }
     if (filtering) stopFilter(false)
     filterText = ""
-    if (!Model.isClientView(next)) returnTo = null
-    else if (!Model.isClientView(from)) returnTo = here
     view = next
     flick.contentY = 0
     if (!cursorActive) return
     if (next !== "") {
-      setCursor(Model.isClientView(next) ? "client" : "detail", 0)
+      setCursor(Model.isClientView(next) ? "client" : Model.isDeviceView(next) ? "device" : "detail", 0)
     } else {
       // Land back on the row we drilled in from.
       var rows = summarySection.rows
@@ -207,8 +220,9 @@ Panel {
 
   function back() {
     if (view === "") return
-    var to = clientView ? returnTo : null
-    setView(to ? to.view : "")
+    var to = trail.length > 0 ? trail[trail.length - 1] : null
+    trail = trail.slice(0, -1)
+    showView(to ? to.view : "")
     if (!to) return
     filterText = to.filter
     if (cursorActive) {
@@ -276,7 +290,7 @@ Panel {
     if (filtering) stopFilter(false)
     view = ""
     filterText = ""
-    returnTo = null
+    trail = []
   }
 
   Service {
@@ -291,6 +305,7 @@ Panel {
     onLogsChanged: Qt.callLater(root.clampCursor)
     onClientChanged: Qt.callLater(root.clampCursor)
     onClientTrafficChanged: Qt.callLater(root.clampCursor)
+    onDeviceChanged: Qt.callLater(root.clampCursor)
   }
 
   Timer {
@@ -326,7 +341,7 @@ Panel {
     function currentView(): string { return root.view }
     function rowCount(): int {
       if (root.view === "") return wanSection.rowCount + selfSection.rowCount + summarySection.rowCount
-      return (root.clientView ? clientSection.rowCount : 0) + detailSection.rowCount
+      return (root.clientView ? clientSection.rowCount : 0) + (root.deviceView ? deviceSection.rowCount : 0) + detailSection.rowCount
     }
   }
 
@@ -509,6 +524,7 @@ Panel {
                 anchors.verticalCenter: parent.verticalCenter
                 textFormat: Text.PlainText
                 text: root.viewClient ? (root.viewClient.name || root.viewClient.mac || "Client")
+                  : root.viewDevice ? (root.viewDevice.name || root.viewDevice.mac || "Device")
                   : (root.viewInfo ? root.viewInfo.title : "")
                 color: root.foreground
                 font.family: root.fontFamily
@@ -550,6 +566,16 @@ Panel {
             rows: root.clientView ? Model.clientInfoRows(root.viewClient) : []
           }
 
+          // Device view: addresses, uplink, current rate and radios from `devices get`.
+          Section {
+            id: deviceSection
+            visible: root.deviceView && available
+            panel: root
+            sectionId: "device"
+            heading: Model.deviceHeading(root.viewDevice)
+            rows: root.deviceView ? Model.deviceInfoRows(root.viewDevice) : []
+          }
+
           // Top of the list, so it stays on screen however long the list is.
           TextField {
             id: filterField
@@ -569,10 +595,12 @@ Panel {
             panel: root
             sectionId: "detail"
             heading: root.filterText !== "" ? "FILTER · \"" + root.filterText + "\""
+              : !root.viewInfo ? ""
               : root.clientView ? Model.trafficHeading(service.clientTraffic, root.viewInfo.clientId)
-              : (root.viewInfo ? root.viewInfo.heading : "")
+              : root.deviceView ? Model.deviceListHeading(service.device, root.viewInfo.deviceId)
+              : root.viewInfo.heading
             rows: root.view === "" ? [] : Model.detailRows(root.view,
-              { devices: service.devices, clients: service.clients, logs: service.logs, clientTraffic: service.clientTraffic },
+              { devices: service.devices, clients: service.clients, logs: service.logs, clientTraffic: service.clientTraffic, device: service.device },
               root.maxClients, root.filterText)
           }
 
@@ -581,7 +609,8 @@ Panel {
             width: parent.width
             textFormat: Text.PlainText
             text: !root.detailLoaded ? "Loading…" : root.filterText !== "" ? "No matches"
-              : root.clientView ? "No internet traffic in the last 24h" : "Nothing to show"
+              : root.clientView ? "No internet traffic in the last 24h"
+              : root.deviceView ? "No ports or clients" : "Nothing to show"
             color: root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.bodySmall
