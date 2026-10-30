@@ -1,5 +1,8 @@
-// Runs Model.js exactly as QML loads it and checks it against live unifictl
-// output. Run with: node --test tests/
+// Runs Model.js exactly as QML loads it: offline tests use made-up samples,
+// live tests check it against real `unifictl` output. Run with:
+//   node --test tests/
+// The live tests skip when unifictl is missing or cannot reach the
+// controller, or when UNIFICTL_LIVE=0.
 const test = require("node:test")
 const assert = require("node:assert/strict")
 const fs = require("node:fs")
@@ -11,6 +14,24 @@ const Model = vm.createContext({})
 vm.runInContext(fs.readFileSync(path.join(__dirname, "..", "Model.js"), "utf8"), Model)
 
 const unifictl = (...args) => JSON.parse(execFileSync("unifictl", [...args, "-o", "json"], { encoding: "utf8" }))
+
+// Why the live tests cannot run here, or "" when they can. The timeout
+// covers an API key behind a gpg prompt nobody can answer.
+function liveSkipReason() {
+  if (process.env.UNIFICTL_LIVE === "0") return "UNIFICTL_LIVE=0"
+  try {
+    execFileSync("unifictl", ["status", "-o", "json"], { stdio: ["ignore", "ignore", "pipe"], timeout: 20000 })
+    return ""
+  } catch (e) {
+    if (e.code === "ENOENT") return "unifictl is not installed"
+    if (e.signal) return "unifictl status timed out"
+    const lines = String(e.stderr || "").trim().split("\n")
+    return "unifictl cannot reach the controller: " + (lines.pop() || "exit " + e.status)
+  }
+}
+
+const skipLive = liveSkipReason()
+const liveTest = (name, fn) => test(name, { skip: skipLive || false }, fn)
 
 test("verdicts: idle is fine, warn is a warning, anything else is an error", () => {
   const s = (...v) => ({ rows: v.map((verdict) => ({ verdict, area: "x" })) })
@@ -91,7 +112,7 @@ test("leaf rows offer a copy menu and a details command", () => {
   assert.equal(alarm.details, undefined)
 })
 
-test("live status, devices and clients produce rows", () => {
+liveTest("live status, devices and clients produce rows", () => {
   const status = unifictl("status")
   const self = unifictl("clients", "list", "--self")
   const selfRows = Model.selfRows(self)
@@ -218,7 +239,7 @@ test("client view: info rows from clients get, app rows from clients traffic", (
   assert.equal(Model.trafficHeading(null, "laptop"), "TRAFFIC · 24H")
 })
 
-test("live client view and traffic", () => {
+liveTest("live client view and traffic", () => {
   const self = unifictl("clients", "list", "--self")
   const traffic = unifictl("clients", "traffic")
   assert.ok(traffic.items.length > 0)
@@ -242,7 +263,7 @@ test("hero: controller name, falling back to UniFi", () => {
   assert.equal(Model.controllerName(null), "UniFi")
 })
 
-test("hero: live status names the controller", () => {
+liveTest("hero: live status names the controller", () => {
   const s = unifictl("status")
   assert.notEqual(Model.controllerName(s), "UniFi")
 })

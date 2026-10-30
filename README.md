@@ -120,8 +120,10 @@ omarchy-shell bwilczynski.unifictl error         # last unifictl error, if any
 Saving a file hot-reloads the plugin. New or changed IPC methods only register
 after `omarchy restart shell`.
 
-`Model.js` has no QML dependencies. The tests run it under node against live
-`unifictl` output:
+`Model.js` has no QML dependencies. The tests run it under node, against
+made-up samples and against live `unifictl` output. The live tests skip when
+`unifictl` is missing or cannot reach the controller, or with
+`UNIFICTL_LIVE=0`:
 
 ```sh
 node --test tests/
