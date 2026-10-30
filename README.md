@@ -22,20 +22,25 @@ look, dimmed when the last refresh failed. Clicking it opens a compact popup:
 | Wired | `unifictl clients list` | wired clients with switch, port and link speed |
 | Alarms | `unifictl logs -r -p high` | recent high-severity events |
 
-Opening any client (This device, Wi-Fi, Wired) shows the **client view**:
-its IP, MAC, where it is connected and how well, its current download and
-upload rate (`unifictl clients get <id>`), and its internet traffic over the
-last 24h by application, heaviest first (`unifictl clients traffic <id>`).
-Back returns to the list and row you opened it from.
+Client and device views open like Omarchy's network panel: the icon, name
+and status on top, then a grid of labelled values. Click an IP or MAC to
+copy it.
 
-Opening any device (Devices list, or an uplink or port that leads to one)
-shows the **device view** from `unifictl devices get <id>`: its IP, MAC,
-model and firmware, its uplink (or a gateway's WANs), its current rate, and
-for an access point its radios. Below it, a switch or gateway lists its
-ports (what is plugged in, VLAN, PoE, rate), and an access point its Wi-Fi
-clients, weakest signal first. A port or client row opens the device or
-client on the other end; Back walks the trail you followed, one step at a
-time.
+Opening any client (This device, Wi-Fi, Wired) shows the **client view**:
+its IP and MAC, where it is connected and how well, its current receive and
+send rate and uptime (`unifictl clients get <id>`). Below that is its
+internet traffic over the last 24h by application, heaviest first
+(`unifictl clients traffic <id>`). Back returns to the list and row you
+opened it from.
+
+Opening any device (Devices list, or a port that leads to one) shows the
+**device view** from `unifictl devices get <id>`: its IP, MAC, model and
+firmware, its uplink and link speed (or a gateway's WANs), its current rate,
+and for an access point one line per radio. Below it, a switch or gateway
+lists its ports (what is plugged in, VLAN, PoE, rate), and an access point
+its Wi-Fi clients, weakest signal first. A port or client row opens the
+device or client on the other end; Back walks the trail you followed, one
+step at a time.
 
 Values unifictl grades (WAN latency, device experience, Wi-Fi signal, link
 speed) are coloured the way unifictl's tables colour them: green, yellow, red

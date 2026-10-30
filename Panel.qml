@@ -102,9 +102,7 @@ Panel {
   }
 
   function navigableSections() {
-    var all = view === "" ? [wanSection, selfSection, summarySection]
-      : clientView ? [clientSection, detailSection]
-      : deviceView ? [deviceSection, detailSection] : [detailSection]
+    var all = view === "" ? [wanSection, selfSection, summarySection] : [detailSection]
     return all.filter(function(s) { return s.available })
   }
 
@@ -209,7 +207,7 @@ Panel {
     flick.contentY = 0
     if (!cursorActive) return
     if (next !== "") {
-      setCursor(Model.isClientView(next) ? "client" : Model.isDeviceView(next) ? "device" : "detail", 0)
+      setCursor("detail", 0)
     } else {
       // Land back on the row we drilled in from.
       var rows = summarySection.rows
@@ -341,7 +339,7 @@ Panel {
     function currentView(): string { return root.view }
     function rowCount(): int {
       if (root.view === "") return wanSection.rowCount + selfSection.rowCount + summarySection.rowCount
-      return (root.clientView ? clientSection.rowCount : 0) + (root.deviceView ? deviceSection.rowCount : 0) + detailSection.rowCount
+      return detailSection.rowCount
     }
   }
 
@@ -500,9 +498,9 @@ Panel {
             rows: Model.summaryRows(root.status)
           }
 
-          // Detail header: back, title, refresh, open in terminal.
+          // List header: back, title, refresh, open in terminal.
           Item {
-            visible: root.view !== ""
+            visible: root.view !== "" && !Model.isItemView(root.view)
             width: parent.width
             implicitHeight: headerRow.implicitHeight
 
@@ -523,9 +521,7 @@ Panel {
               Text {
                 anchors.verticalCenter: parent.verticalCenter
                 textFormat: Text.PlainText
-                text: root.viewClient ? (root.viewClient.name || root.viewClient.mac || "Client")
-                  : root.viewDevice ? (root.viewDevice.name || root.viewDevice.mac || "Device")
-                  : (root.viewInfo ? root.viewInfo.title : "")
+                text: root.viewInfo ? root.viewInfo.title : ""
                 color: root.foreground
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.title
@@ -556,24 +552,69 @@ Panel {
             }
           }
 
-          // Client view: addresses, link and current rate from `clients get`.
-          Section {
-            id: clientSection
-            visible: root.clientView && available
-            panel: root
-            sectionId: "client"
-            heading: root.viewClient ? Model.join([root.viewClient.connectionType, root.viewClient.status]).toUpperCase() : ""
-            rows: root.clientView ? Model.clientInfoRows(root.viewClient) : []
+          // Client or device view header, like the network panel's: back, then
+          // icon, name and status, with refresh and terminal on the right.
+          Row {
+            visible: Model.isItemView(root.view)
+            width: parent.width
+            spacing: Style.space(8)
+
+            PanelActionButton {
+              id: itemBack
+              anchors.verticalCenter: parent.verticalCenter
+              iconText: Model.ICONS.back
+              tooltipText: "Back (esc / ←)"
+              foreground: root.foreground
+              fontFamily: root.fontFamily
+              onClicked: root.back()
+            }
+
+            PanelHero {
+              width: parent.width - itemBack.width - parent.spacing
+              title: root.viewClient ? (root.viewClient.name || root.viewClient.mac || "Client")
+                : root.viewDevice ? (root.viewDevice.name || root.viewDevice.mac || "Device")
+                : root.clientView ? "Client" : "Device"
+              meta: root.viewClient ? Model.clientHeading(root.viewClient)
+                : root.viewDevice ? Model.deviceHeading(root.viewDevice) : "Loading…"
+              foreground: root.foreground
+              fontFamily: root.fontFamily
+              iconComponent: Component {
+                Text {
+                  textFormat: Text.PlainText
+                  text: root.viewDevice ? Model.deviceIcon(root.viewDevice) : Model.clientIcon(root.viewClient)
+                  color: (root.viewDevice && root.viewDevice.status !== "connected") ? root.urgent : root.foreground
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.display
+                }
+              }
+              trailingControl: Component {
+                Row {
+                  spacing: Style.space(4)
+                  PanelActionButton {
+                    iconText: Model.ICONS.refresh
+                    tooltipText: service.refreshing ? "Refreshing…" : "Refresh (r)"
+                    foreground: root.foreground
+                    fontFamily: root.fontFamily
+                    opacity: service.refreshing ? 0.5 : 1.0
+                    onClicked: service.refresh(true)
+                  }
+                  PanelActionButton {
+                    iconText: Model.ICONS.open
+                    tooltipText: "Open in terminal (t)"
+                    foreground: root.foreground
+                    fontFamily: root.fontFamily
+                    onClicked: root.openInTerminal()
+                  }
+                }
+              }
+            }
           }
 
-          // Device view: addresses, uplink, current rate and radios from `devices get`.
-          Section {
-            id: deviceSection
-            visible: root.deviceView && available
+          FactGrid {
+            visible: Model.isItemView(root.view) && facts.length > 0
             panel: root
-            sectionId: "device"
-            heading: Model.deviceHeading(root.viewDevice)
-            rows: root.deviceView ? Model.deviceInfoRows(root.viewDevice) : []
+            facts: root.viewClient ? Model.clientFacts(root.viewClient)
+              : root.viewDevice ? Model.deviceFacts(root.viewDevice) : []
           }
 
           // Top of the list, so it stays on screen however long the list is.

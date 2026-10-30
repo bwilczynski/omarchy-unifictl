@@ -475,43 +475,87 @@ function selfRows(self, traffic) {
   })
 }
 
+// ---- item views: header and facts ------------------------------------------
+//
+// The top of a client or device view is a hero (icon, name, status line) over
+// a grid of facts, like Omarchy's network panel. A fact is
+//   { label, value, grade, attention, copy: bool, wide: bool }
+// where grade colours the value, attention paints it urgent, copy makes a
+// click copy it, and wide gives it a line of its own.
+
+function fact(label, value, extra) {
+  var f = { label: label, value: value === null || value === undefined ? "" : String(value),
+    grade: "", attention: false, copy: false, wide: false }
+  for (var k in extra || {}) f[k] = extra[k]
+  return f
+}
+
+function present(facts) {
+  return facts.filter(function(f) { return f.value !== "" })
+}
+
+function percent(v) {
+  return v === null || v === undefined ? "" : v + "%"
+}
+
+// Current rate and uptime, shared by clients and devices.
+function rateFacts(x) {
+  var t = x.traffic
+  var list = []
+  if (t) {
+    list.push(fact("Receiving", t.rxBytesPerSec !== undefined && t.rxBytesPerSec !== null ? formatRate(t.rxBytesPerSec) : ""))
+    list.push(fact("Sending", t.txBytesPerSec !== undefined && t.txBytesPerSec !== null ? formatRate(t.txBytesPerSec) : ""))
+  }
+  list.push(fact("Uptime", x.uptime ? formatDuration(x.uptime) : ""))
+  list.push(fact("Experience", percent(x.experience), { grade: grade(x.experienceHealth), attention: isPoor(x.experienceHealth) }))
+  return list
+}
+
+// Grid cells for facts in a 4-column grid: label, value, label, value. A wide
+// fact starts a new line and spans the three value columns.
+// [{ text, label: bool, span, fact }]
+function factCells(facts) {
+  var cells = []
+  var col = 0
+  for (var i = 0; i < facts.length; i++) {
+    var f = facts[i]
+    if (f.wide && col !== 0) { cells.push({ text: "", label: true, span: 2, fact: null }); col = 0 }
+    cells.push({ text: f.label, label: true, span: 1, fact: null })
+    cells.push({ text: f.value, label: false, span: f.wide ? 3 : 1, fact: f })
+    col = f.wide ? 0 : (col + 2) % 4
+  }
+  return cells
+}
+
 // ---- client view ------------------------------------------------------------
 
-// The top of the client view, from `unifictl clients get <id>`: addresses,
-// where it is attached, and its current rate.
-function clientInfoRows(c) {
+function clientIcon(c) {
+  return c && c.connectionType === "wireless" ? ICONS.wifi : ICONS.ethernet
+}
+
+// "WIRELESS · ONLINE" under the client's name.
+function clientHeading(c) {
+  return c ? join([c.connectionType, c.status]).toUpperCase() : ""
+}
+
+// The client view's facts, from `unifictl clients get <id>`: addresses,
+// where it is attached and how well, its current rate.
+function clientFacts(c) {
   if (!c) return []
   var link = clientLink(c)
   var to = c.connectedTo || {}
-  var copy = { ip: c.ip || "", name: c.name || "", mac: c.mac || "" }
-  var list = [{
-    icon: ICONS.other,
-    title: c.ip || c.mac || c.name || "",
-    subtitle: join([c.ip ? c.mac : "", c.connectionType, c.status]),
-    copy: copy,
-    action: "copy"
-  }, {
-    icon: link.wireless ? ICONS.wifi : ICONS.ethernet,
-    title: link.wireless ? link.where : join([to.device ? to.device.name : "", to.port !== undefined && to.port !== null ? "port " + to.port : ""]),
-    subtitle: join([to.rateMbps ? to.rateMbps + " Mbps" : "",
-      c.experience !== undefined && c.experience !== null ? "experience " + c.experience + "%" : ""]),
-    trailing: link.value,
-    grade: link.grade,
-    attention: link.grade === "poor" || isPoor(c.experienceHealth),
-    copy: copy,
-    action: "copy"
-  }]
-  var rate = c.traffic ? downUp(c.traffic.rxBytesPerSec, c.traffic.txBytesPerSec, formatRate, "  ") : ""
-  if (rate !== "") {
-    list.push({
-      icon: ICONS.traffic,
-      title: rate,
-      subtitle: join(["Right now", c.uptime ? "up " + formatDuration(c.uptime) : ""]),
-      copy: copy,
-      action: "copy"
-    })
-  }
-  return list
+  var list = [
+    fact("IP", c.ip, { copy: true }),
+    fact(link.wireless ? "Signal" : "Link", link.value, { grade: link.grade, attention: link.grade === "poor" })
+  ]
+  if (link.wireless) list.push(fact("Rate", to.rateMbps ? to.rateMbps + " Mbps" : ""))
+  list = present(list.concat(rateFacts(c)))
+  // Long values get a line of their own, after the pairs.
+  return list.concat(present([
+    fact("MAC", c.mac, { copy: true, wide: true }),
+    fact("Connected to", link.wireless ? link.where
+      : join([to.device ? to.device.name : "", to.port !== undefined && to.port !== null ? "port " + to.port : ""]), { wide: true })
+  ]))
 }
 
 // Traffic of `unifictl clients traffic <id>` for the client on screen; the
@@ -544,8 +588,7 @@ function appRows(traffic, id, max, filter) {
       subtitle: join([a.category ? a.category.name : "", downUp(a.bytesReceived, a.bytesTransmitted, formatBytes),
         a.activitySeconds ? "active " + formatDuration(a.activitySeconds) : ""]),
       trailing: formatBytes(a.totalBytes),
-      copy: { name: a.name || "" },
-      action: "copy"
+      action: ""
     })
   }
   if (items.length > shown) {
@@ -570,78 +613,47 @@ function deviceHeading(d) {
   return join([DEVICE_TYPES[d.type] || d.type, d.status]).toUpperCase()
 }
 
-// The top of the device view, from `unifictl devices get <id>`: addresses
-// and model, what it hangs off (uplink, or the WANs of a gateway), its
-// current rate and, for an access point, its radios.
-function deviceInfoRows(d) {
+// The device view's facts, from `unifictl devices get <id>`: addresses and
+// model, what it hangs off (uplink, or the WANs of a gateway), its current
+// rate and, for an access point, a line per radio.
+function deviceFacts(d) {
   if (!d) return []
-  var copy = { ip: d.ip || "", name: d.name || "", mac: d.mac || "" }
-  var list = [{
-    icon: deviceIcon(d),
-    title: d.ip || d.mac || d.name || "",
-    subtitle: join([d.ip ? d.mac : "", d.model, d.firmwareVersion ? "firmware " + d.firmwareVersion : ""]),
-    trailing: d.experience !== undefined && d.experience !== null ? d.experience + "%" : "",
-    grade: grade(d.experienceHealth),
-    attention: d.status !== "connected" || isPoor(d.experienceHealth),
-    copy: copy,
-    action: "copy"
-  }]
+  var list = [
+    fact("IP", d.ip, { copy: true }),
+    fact("Model", d.model),
+    fact("Firmware", d.firmwareVersion)
+  ]
   var up = d.uplink
   if (up && up.device) {
-    var open = deviceAction(up.device.id)
-    list.push({
-      icon: ICONS.ethernet,
-      title: join([up.device.name, up.port !== undefined && up.port !== null ? "port " + up.port : ""]),
-      subtitle: join(["Uplink", up.maxLinkSpeed && up.maxLinkSpeed !== up.linkSpeed ? "max " + formatLinkSpeed(up.maxLinkSpeed) : "",
-        up.fullDuplex === false ? "half duplex" : ""]),
-      trailing: formatLinkSpeed(up.linkSpeed),
-      grade: grade(up.linkSpeedHealth),
-      attention: isPoor(up.linkSpeedHealth),
-      copy: { name: up.device.name || "" },
-      details: open,
-      action: open !== "" ? open : "copy"
-    })
+    list.push(fact("Link", join([formatLinkSpeed(up.linkSpeed),
+      up.maxLinkSpeed && up.maxLinkSpeed !== up.linkSpeed ? "max " + formatLinkSpeed(up.maxLinkSpeed) : "",
+      up.fullDuplex === false ? "half duplex" : ""]),
+      { grade: grade(up.linkSpeedHealth), attention: isPoor(up.linkSpeedHealth) }))
+  }
+  list = present(list.concat(rateFacts(d)))
+  // Long values get a line of their own, after the pairs.
+  list.push(fact("MAC", d.mac, { copy: true, wide: true }))
+  if (up && up.device) {
+    list.push(fact("Uplink", join([up.device.name, up.port !== undefined && up.port !== null ? "port " + up.port : ""]), { wide: true }))
   }
   var wans = Array.isArray(d.wans) ? d.wans : []
-  for (var i = 0; i < wans.length; i++) {
-    list.push({
-      icon: ICONS.internet,
-      title: wans[i].name || String(wans[i].id),
-      subtitle: "WAN",
-      copy: { name: wans[i].name || "" },
-      details: getCommand("wans", wans[i].id),
-      action: "copy"
-    })
-  }
-  var rate = d.traffic ? downUp(d.traffic.rxBytesPerSec, d.traffic.txBytesPerSec, formatRate, "  ") : ""
-  if (rate !== "") {
-    list.push({
-      icon: ICONS.traffic,
-      title: rate,
-      subtitle: join(["Right now", d.uptime ? "up " + formatDuration(d.uptime) : ""]),
-      copy: copy,
-      action: "copy"
-    })
-  }
+  for (var i = 0; i < wans.length; i++) list.push(fact("WAN", wans[i].name || String(wans[i].id), { wide: true }))
   var radios = Array.isArray(d.radios) ? d.radios : []
-  for (var r = 0; r < radios.length; r++) list.push(radioRow(radios[r]))
-  return list
+  for (var r = 0; r < radios.length; r++) list.push(radioFact(radios[r]))
+  return present(list)
 }
 
-function radioRow(r) {
-  var pct = function(v, label) { return v === null || v === undefined ? "" : label + " " + v + "%" }
-  var poor = isPoor(r.utilisationHealth) || isPoor(r.interferenceHealth) || isPoor(r.retriesHealth) || isPoor(r.satisfactionHealth)
-  return {
-    icon: ICONS.wifi,
-    title: join([r.band, r.channel ? "ch " + r.channel : "", r.width ? r.width + " MHz" : ""]),
-    subtitle: join([r.clients !== undefined && r.clients !== null ? r.clients + (r.clients === 1 ? " client" : " clients") : "",
-      pct(r.utilisation, "util"), pct(r.interference, "interference"), pct(r.retries, "retries"),
-      r.txPower ? r.txPower + " dBm" : ""]),
-    trailing: r.satisfaction !== null && r.satisfaction !== undefined ? r.satisfaction + "%" : "",
-    grade: grade(r.satisfactionHealth),
-    attention: poor,
-    action: ""
-  }
+// "ch 48 · 80 MHz · 3 clients · 97%", naming any metric that grades poor.
+function radioFact(r) {
+  var poor = []
+  if (isPoor(r.utilisationHealth)) poor.push("util " + r.utilisation + "%")
+  if (isPoor(r.interferenceHealth)) poor.push("interference " + r.interference + "%")
+  if (isPoor(r.retriesHealth)) poor.push("retries " + r.retries + "%")
+  var value = join([r.channel ? "ch " + r.channel : "", r.width ? r.width + " MHz" : "",
+    r.clients !== undefined && r.clients !== null ? r.clients + (r.clients === 1 ? " client" : " clients") : "",
+    percent(r.satisfaction)].concat(poor))
+  return fact(r.band || "Radio", value, { wide: true, grade: grade(r.satisfactionHealth),
+    attention: poor.length > 0 || isPoor(r.satisfactionHealth) })
 }
 
 // `unifictl devices get <id>` for the device on screen; the last fetch may

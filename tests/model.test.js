@@ -197,27 +197,31 @@ test("this device shows its 24h traffic", () => {
   assert.equal(Model.selfRows(self, { items: [] })[0].subtitle, "10.0.0.5 · US 8 port 5")
 })
 
-test("client view: info rows from clients get, app rows from clients traffic", () => {
+const facts = (list) => Object.fromEntries([...list].map((f) => [f.label, f.value]))
+
+test("client view: facts from clients get, app rows from clients traffic", () => {
   const wired = { id: "laptop", name: "laptop", mac: "aa:bb", ip: "10.0.0.5", connectionType: "wired", status: "online",
     connectedTo: { device: { name: "US 8" }, port: 5, linkSpeed: "gbe1", linkSpeedHealth: "good" },
     traffic: { rxBytesPerSec: 2048, txBytesPerSec: 1536 }, uptime: 273600 }
-  const rows = Model.clientInfoRows(wired)
-  assert.deepEqual([...rows].map((r) => r.title), ["10.0.0.5", "US 8 · port 5", "↓ 2.0 KB/s  ↑ 1.5 KB/s"])
-  assert.equal(rows[0].subtitle, "aa:bb · wired · online")
-  assert.deepEqual({ ...rows[0].copy }, { ip: "10.0.0.5", name: "laptop", mac: "aa:bb" })
-  assert.equal(rows[1].trailing, "1 GbE")
+  const rows = Model.clientFacts(wired)
+  assert.deepEqual(facts(rows), { IP: "10.0.0.5", MAC: "aa:bb", "Connected to": "US 8 · port 5", Link: "1 GbE",
+    Receiving: "2.0 KB/s", Sending: "1.5 KB/s", Uptime: "3d 4h" })
+  assert.deepEqual([...rows].filter((f) => f.copy).map((f) => f.label), ["IP", "MAC"])
+  assert.deepEqual([...rows].map((f) => f.label), ["IP", "Link", "Receiving", "Sending", "Uptime", "MAC", "Connected to"],
+    "short facts pair up first, long ones after on lines of their own")
   assert.equal(rows[1].grade, "good")
-  assert.equal(rows[2].subtitle, "Right now · up 3d 4h")
-  assert.equal(Model.clientInfoRows(null).length, 0)
+  assert.equal(rows[6].wide, true)
+  assert.equal(Model.clientHeading(wired), "WIRED · ONLINE")
+  assert.equal(Model.clientIcon(wired), Model.ICONS.ethernet)
+  assert.equal(Model.clientFacts(null).length, 0)
 
-  const wifi = Model.clientInfoRows({ id: "s", name: "Speaker", ip: "10.0.0.6", connectionType: "wireless", status: "online",
+  const wifi = Model.clientFacts({ id: "s", name: "Speaker", ip: "10.0.0.6", connectionType: "wireless", status: "online",
     connectedTo: { device: { name: "UAP-01" }, ssid: "HomeWiFi", signalStrength: -70, rateMbps: 130, signalStrengthHealth: "poor" },
     experience: 95, experienceHealth: "good" })
-  assert.equal(wifi[1].title, "HomeWiFi @ UAP-01")
-  assert.equal(wifi[1].subtitle, "130 Mbps · experience 95%")
-  assert.equal(wifi[1].trailing, "-70 dBm")
+  assert.deepEqual(facts(wifi), { IP: "10.0.0.6", "Connected to": "HomeWiFi @ UAP-01", Signal: "-70 dBm", Rate: "130 Mbps", Experience: "95%" },
+    "no MAC, rate or uptime when unknown")
   assert.equal(wifi[1].attention, true)
-  assert.equal(wifi.length, 2, "no rate row without traffic")
+  assert.equal(wifi[3].grade, "good")
 
   const traffic = { id: "laptop", items: [
     { name: "SSL/TLS", category: { name: "Network protocols" }, bytesReceived: 314572800, bytesTransmitted: 104857600, totalBytes: 419430400, activitySeconds: 3600 },
@@ -229,6 +233,8 @@ test("client view: info rows from clients get, app rows from clients traffic", (
   assert.equal(apps[0].trailing, "940.0 MB")
   assert.equal(apps[0].subtitle, "Media streaming · ↓ 900.0 MB ↑ 40.0 MB · active 12h 0m")
   assert.equal(apps[2].subtitle, "Software updates · ↓ 20.0 MB ↑ 4.0 MB")
+  assert.equal(apps[0].action, "", "nothing to open or copy on an app")
+  assert.equal(apps[0].copy, undefined)
   assert.equal(Model.appRows(traffic, "laptop", 10, "updates").length, 1)
   assert.equal(Model.appRows(traffic, "other", 10, "").length, 0, "stale traffic for another client is ignored")
   const capped = Model.appRows(traffic, "laptop", 2, "")
@@ -248,16 +254,17 @@ liveTest("live client view and traffic", () => {
   console.log("self", JSON.stringify(selfRows.map((r) => r.subtitle)))
   const id = (self.items[0] || traffic.items[0]).id
   const client = unifictl("clients", "get", id)
-  const info = Model.clientInfoRows(client)
+  const info = Model.clientFacts(client)
   assert.ok(info.length >= 2)
   const apps = Model.appRows(unifictl("clients", "traffic", id), id, 100, "")
   assert.ok(apps.length > 0)
-  for (const r of [...info, ...apps, ...selfRows]) assert.ok(!/undefined|NaN/.test(r.title + r.subtitle + (r.trailing || "")), r.title + " " + r.subtitle)
-  console.log(JSON.stringify(info.map((r) => [r.title, r.subtitle, r.trailing])), apps.length, "apps")
+  for (const f of info) assert.ok(!/undefined|NaN|null/.test(f.value), f.label + " " + f.value)
+  for (const r of [...apps, ...selfRows]) assert.ok(!/undefined|NaN/.test(r.title + r.subtitle + (r.trailing || "")), r.title + " " + r.subtitle)
+  console.log(JSON.stringify(facts(info)), apps.length, "apps")
   execFileSync("bash", ["-c", Model.viewInfo("client:" + id).terminal.replace(/;/g, " -o json >/dev/null;") + " -o json >/dev/null"])
 })
 
-test("device view: info rows, ports and AP clients from devices get", () => {
+test("device view: facts, ports and AP clients from devices get", () => {
   const info = Model.viewInfo("device:us-8")
   assert.equal(info.needs, "device")
   assert.equal(info.deviceId, "us-8")
@@ -279,15 +286,13 @@ test("device view: info rows, ports and AP clients from devices get", () => {
         connectedTo: { kind: "client", id: "nas", name: "NAS" } },
       { number: 4, state: "up", linkSpeed: "fe" }
     ] }
-  const rows = Model.deviceInfoRows(sw)
-  assert.deepEqual([...rows].map((r) => r.title), ["192.168.1.44", "US 8 60W · port 7", "↓ 437 B/s  ↑ 2.0 KB/s"])
-  assert.equal(rows[0].subtitle, "e0:63 · USC8 · firmware 7.5.15")
-  assert.equal(rows[0].trailing, "95%")
-  assert.equal(rows[1].action, "view:device:us-8-60w")
-  assert.equal(rows[1].trailing, "1 GbE")
-  assert.equal(rows[2].subtitle, "Right now · up 10d 12h")
+  const rows = Model.deviceFacts(sw)
+  assert.deepEqual(facts(rows), { IP: "192.168.1.44", MAC: "e0:63", Model: "USC8", Firmware: "7.5.15",
+    Uplink: "US 8 60W · port 7", Link: "1 GbE", Receiving: "437 B/s", Sending: "2.0 KB/s", Uptime: "10d 12h", Experience: "95%" })
+  assert.deepEqual([...rows].map((f) => f.label), ["IP", "Model", "Firmware", "Link", "Receiving", "Sending", "Uptime", "Experience", "MAC", "Uplink"])
+  assert.equal(rows[3].grade, "good")
   assert.equal(Model.deviceHeading(sw), "SWITCH · CONNECTED")
-  assert.equal(Model.deviceInfoRows(null).length, 0)
+  assert.equal(Model.deviceFacts(null).length, 0)
 
   const data = { device: sw }
   const ports = Model.detailRows("device:us-8", data, 10, "")
@@ -305,9 +310,8 @@ test("device view: info rows, ports and AP clients from devices get", () => {
   assert.equal(Model.deviceListHeading(sw, "us-8"), "PORTS · 3/4 UP")
 
   const gw = { id: "gw", name: "GW", type: "gateway", status: "connected", wans: [{ id: "internet-1", name: "Internet 1" }] }
-  const gwRows = Model.deviceInfoRows(gw)
-  assert.equal(gwRows[1].title, "Internet 1")
-  assert.equal(gwRows[1].details, "unifictl wans get 'internet-1'")
+  const gwFacts = Model.deviceFacts(gw)
+  assert.deepEqual([...gwFacts].map((f) => [f.label, f.value, f.wide]), [["WAN", "Internet 1", true]])
 
   const ap = { id: "uap", name: "UAP", type: "accessPoint", status: "connected", numClients: 3,
     radios: [{ band: "5G", channel: 48, width: 80, txPower: 20, utilisation: 2, interference: 0, retries: 8.1, clients: 3,
@@ -317,10 +321,10 @@ test("device view: info rows, ports and AP clients from devices get", () => {
       { client: { kind: "client", id: "b", name: "B" }, ssid: "home", signalStrength: -75, signalStrengthHealth: "poor" },
       { client: { kind: "client", id: "c", name: "C" }, ssid: "iot", signalStrength: -60, signalStrengthHealth: "fair" }
     ] }
-  const radio = Model.deviceInfoRows(ap).pop()
-  assert.equal(radio.title, "5G · ch 48 · 80 MHz")
-  assert.equal(radio.subtitle, "3 clients · util 2% · interference 0% · retries 8.1% · 20 dBm")
-  assert.equal(radio.trailing, "97%")
+  const radio = Model.deviceFacts(ap).pop()
+  assert.equal(radio.label, "5G")
+  assert.equal(radio.value, "ch 48 · 80 MHz · 3 clients · 97% · retries 8.1%", "only poor metrics are named")
+  assert.equal(radio.wide, true)
   assert.equal(radio.attention, true)
   const clients = Model.deviceListRows(ap, "uap", 2, "")
   assert.deepEqual([...clients].map((r) => r.title), ["B", "C", "1 more"], "weakest first, capped")
@@ -331,12 +335,27 @@ test("device view: info rows, ports and AP clients from devices get", () => {
   assert.equal(Model.deviceHeading(ap), "ACCESS POINT · CONNECTED")
 })
 
+test("fact grid: pairs per line, wide facts on a line of their own", () => {
+  const f = (label, wide) => ({ label, value: label.toLowerCase(), wide: !!wide })
+  const cells = Model.factCells([f("IP"), f("MAC"), f("Uptime"), f("5G", true), f("6G", true)])
+  assert.deepEqual([...cells].map((c) => [c.text, c.span]), [
+    ["IP", 1], ["ip", 1], ["MAC", 1], ["mac", 1],
+    ["Uptime", 1], ["uptime", 1], ["", 2],
+    ["5G", 1], ["5g", 3],
+    ["6G", 1], ["6g", 3]
+  ])
+  assert.equal(cells[1].fact.label, "IP")
+  assert.equal(cells[0].label, true)
+})
+
 liveTest("live device view for every device", () => {
   const devices = unifictl("devices", "list")
   for (const { id } of devices.items) {
     const d = unifictl("devices", "get", id)
-    const rows = [...Model.deviceInfoRows(d), ...Model.deviceListRows(d, id, 100, "")]
-    assert.ok(rows.length >= 2, id)
+    const info = Model.deviceFacts(d)
+    for (const f of info) assert.ok(!/undefined|NaN|null/.test(f.value), id + ": " + f.label + " " + f.value)
+    const rows = Model.deviceListRows(d, id, 100, "")
+    assert.ok(info.length + rows.length >= 2, id)
     for (const r of rows) assert.ok(!/undefined|NaN|null/.test(r.title + r.subtitle + (r.trailing || "")), id + ": " + r.title + " " + r.subtitle)
     for (const r of rows) if (r.action.startsWith("view:")) assert.ok(Model.viewInfo(r.action.slice(5)), r.action)
     console.log(id, Model.deviceHeading(d), "|", Model.deviceListHeading(d, id), "|", rows.length, "rows")
