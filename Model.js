@@ -21,7 +21,8 @@ var ICONS = {
   chevron: String.fromCodePoint(0xF0142),   // md-chevron_right
   back: String.fromCodePoint(0xF004D),      // md-arrow_left
   copy: String.fromCodePoint(0xF018F),      // md-content_copy
-  details: String.fromCodePoint(0xF02FD)    // md-information_outline
+  details: String.fromCodePoint(0xF02FD),   // md-information_outline
+  traffic: String.fromCodePoint(0xF04E1)    // md-swap_vertical
 }
 
 // ---- verdicts -------------------------------------------------------------
@@ -91,6 +92,31 @@ function formatAge(ms, nowMs) {
   if (s < 60) return s + "s ago"
   if (s < 3600) return Math.floor(s / 60) + "m ago"
   return Math.floor(s / 3600) + "h ago"
+}
+
+// Byte counts the way unifictl's tables print them: 1024-based, one decimal.
+var BYTE_UNITS = ["B", "KB", "MB", "GB", "TB", "PB"]
+
+function formatBytes(bytes) {
+  if (bytes === null || bytes === undefined || !isFinite(bytes)) return ""
+  var n = Math.max(0, Number(bytes))
+  var unit = 0
+  while (n >= 1024 && unit < BYTE_UNITS.length - 1) { n /= 1024; unit++ }
+  return (unit === 0 ? String(Math.round(n)) : n.toFixed(1)) + " " + BYTE_UNITS[unit]
+}
+
+function formatRate(bytesPerSec) {
+  var b = formatBytes(bytesPerSec)
+  return b === "" ? "" : b + "/s"
+}
+
+// "↓ 1.3 GB ↑ 175.0 MB" from a received / transmitted pair (unifictl's
+// DOWN / UP columns), or "" when neither is known.
+function downUp(received, transmitted, format, gap) {
+  var down = format(received)
+  var up = format(transmitted)
+  if (down === "" && up === "") return ""
+  return "↓ " + (down || "0 B") + (gap || " ") + "↑ " + (up || "0 B")
 }
 
 function join(parts) {
@@ -197,15 +223,21 @@ function formatLinkSpeed(speed) {
 //
 // A leaf row has action "copy" (Enter opens its copy menu) and, when
 // unifictl can show it on its own, `details`: the `… get <id>` command to
-// run in a terminal.
+// run in a terminal. A client row instead opens the client view: both its
+// action and its `details` are "view:client:<id>".
 //
 // `grade` is unifictl's health grade for the trailing value ("good", "fair",
 // "poor", or "" when ungraded); the row colours that value with it.
 
+// `<command> '<id>'` with the id shell-quoted, or "" without an id.
+function quotedCommand(command, id) {
+  if (id === null || id === undefined || String(id) === "") return ""
+  return command + " '" + String(id).replace(/'/g, "'\\''") + "'"
+}
+
 // `unifictl <noun> get <id>`, or "" without an id.
 function getCommand(noun, id) {
-  if (id === null || id === undefined || String(id) === "") return ""
-  return "unifictl " + noun + " get '" + String(id).replace(/'/g, "'\\''") + "'"
+  return quotedCommand("unifictl " + noun + " get", id)
 }
 
 // Copy menu entries for a row's `copy` values, IP first, empty ones left out.
@@ -380,9 +412,9 @@ function logMatches(e, filter) {
   return matches(fields, filter)
 }
 
-// One client: where it is attached, and the graded value that says how well
-// (signal for Wi-Fi, link speed for a cable).
-function clientRow(c) {
+// Where a client is attached ("ssid @ AP" or "switch port N"), and the graded
+// value that says how well: signal for Wi-Fi, link speed for a cable.
+function clientLink(c) {
   var to = c.connectedTo || {}
   var wireless = c.connectionType === "wireless"
   var where = to.device ? to.device.name : ""
@@ -391,26 +423,133 @@ function clientRow(c) {
   var value = wireless
     ? (to.signalStrength !== undefined && to.signalStrength !== null ? to.signalStrength + " dBm" : "")
     : formatLinkSpeed(to.linkSpeed)
-  var g = grade(wireless ? to.signalStrengthHealth : to.linkSpeedHealth)
+  return { wireless: wireless, where: where, value: value, grade: grade(wireless ? to.signalStrengthHealth : to.linkSpeedHealth) }
+}
+
+function clientAction(c) {
+  return c.id === null || c.id === undefined || String(c.id) === "" ? "" : "view:client:" + c.id
+}
+
+function clientRow(c) {
+  var link = clientLink(c)
+  var open = clientAction(c)
   return {
-    icon: wireless ? ICONS.wifi : ICONS.ethernet,
+    icon: link.wireless ? ICONS.wifi : ICONS.ethernet,
     title: c.name || c.mac,
-    subtitle: join([c.ip, where]),
-    trailing: value,
-    grade: g,
-    attention: g === "poor",
+    subtitle: join([c.ip, link.where]),
+    trailing: link.value,
+    grade: link.grade,
+    attention: link.grade === "poor",
     copy: { ip: c.ip || "", name: c.name || "", mac: c.mac || "" },
-    details: getCommand("clients", c.id),
-    action: "copy"
+    details: open,
+    action: open !== "" ? open : "copy"
   }
 }
 
+// One client's entry in `unifictl clients traffic`, or null.
+function trafficFor(traffic, id) {
+  var items = traffic && Array.isArray(traffic.items) ? traffic.items : []
+  for (var i = 0; i < items.length; i++) if (items[i].id === id) return items[i]
+  return null
+}
+
 // This machine, from `unifictl clients list --self`: one row per connection
-// the controller sees (cable and Wi-Fi at once give two). Empty when the
-// controller does not know it (off-site, VPN, older unifictl).
-function selfRows(self) {
+// the controller sees (cable and Wi-Fi at once give two), with its internet
+// traffic over the last 24h from `unifictl clients traffic` when known.
+// Empty when the controller does not know it (off-site, VPN, older unifictl).
+function selfRows(self, traffic) {
   var items = self && Array.isArray(self.items) ? self.items : []
-  return items.map(clientRow)
+  return items.map(function(c) {
+    var row = clientRow(c)
+    var t = trafficFor(traffic, c.id)
+    if (t) row.subtitle = join([row.subtitle, downUp(t.bytesReceived, t.bytesTransmitted, formatBytes) + " 24h"])
+    return row
+  })
+}
+
+// ---- client view ------------------------------------------------------------
+
+// The top of the client view, from `unifictl clients get <id>`: addresses,
+// where it is attached, and its current rate.
+function clientInfoRows(c) {
+  if (!c) return []
+  var link = clientLink(c)
+  var to = c.connectedTo || {}
+  var copy = { ip: c.ip || "", name: c.name || "", mac: c.mac || "" }
+  var list = [{
+    icon: ICONS.other,
+    title: c.ip || c.mac || c.name || "",
+    subtitle: join([c.ip ? c.mac : "", c.connectionType, c.status]),
+    copy: copy,
+    action: "copy"
+  }, {
+    icon: link.wireless ? ICONS.wifi : ICONS.ethernet,
+    title: link.wireless ? link.where : join([to.device ? to.device.name : "", to.port !== undefined && to.port !== null ? "port " + to.port : ""]),
+    subtitle: join([to.rateMbps ? to.rateMbps + " Mbps" : "",
+      c.experience !== undefined && c.experience !== null ? "experience " + c.experience + "%" : ""]),
+    trailing: link.value,
+    grade: link.grade,
+    attention: link.grade === "poor" || isPoor(c.experienceHealth),
+    copy: copy,
+    action: "copy"
+  }]
+  var rate = c.traffic ? downUp(c.traffic.rxBytesPerSec, c.traffic.txBytesPerSec, formatRate, "  ") : ""
+  if (rate !== "") {
+    list.push({
+      icon: ICONS.traffic,
+      title: rate,
+      subtitle: join(["Right now", c.uptime ? "up " + formatDuration(c.uptime) : ""]),
+      copy: copy,
+      action: "copy"
+    })
+  }
+  return list
+}
+
+// Traffic of `unifictl clients traffic <id>` for the client on screen; the
+// last fetch may still belong to the client viewed before.
+function clientTraffic(traffic, id) {
+  return traffic && traffic.id === id && Array.isArray(traffic.items) ? traffic.items : null
+}
+
+function trafficHeading(traffic, id) {
+  var items = clientTraffic(traffic, id)
+  if (!items) return "TRAFFIC · 24H"
+  var rx = 0, tx = 0
+  for (var i = 0; i < items.length; i++) { rx += items[i].bytesReceived || 0; tx += items[i].bytesTransmitted || 0 }
+  return "TRAFFIC · 24H · " + downUp(rx, tx, formatBytes)
+}
+
+// One row per application, heaviest first.
+function appRows(traffic, id, max, filter) {
+  var items = (clientTraffic(traffic, id) || []).filter(function(a) {
+    return matches([a.name, a.category ? a.category.name : ""], filter)
+  })
+  items.sort(function(a, b) { return (b.totalBytes || 0) - (a.totalBytes || 0) })
+  var list = []
+  var shown = Math.min(items.length, max)
+  for (var i = 0; i < shown; i++) {
+    var a = items[i]
+    list.push({
+      icon: ICONS.traffic,
+      title: a.name || String(a.id),
+      subtitle: join([a.category ? a.category.name : "", downUp(a.bytesReceived, a.bytesTransmitted, formatBytes),
+        a.activitySeconds ? "active " + formatDuration(a.activitySeconds) : ""]),
+      trailing: formatBytes(a.totalBytes),
+      copy: { name: a.name || "" },
+      action: "copy"
+    })
+  }
+  if (items.length > shown) {
+    list.push({
+      icon: ICONS.more,
+      title: (items.length - shown) + " more",
+      subtitle: "Open the full list in a terminal",
+      muted: true,
+      action: "term:" + quotedCommand("unifictl clients traffic", id)
+    })
+  }
+  return list
 }
 
 function clientRows(clients, max, filter, connectionType) {
@@ -462,7 +601,24 @@ var VIEWS = {
     filterHint: "Filter alarms by title, message, IP" }
 }
 
+// A client view is "client:<id>": `unifictl clients get` on top, its traffic
+// by application below. It opens from any client row, so it is not in VIEWS.
+var CLIENT_VIEW = "client:"
+
+function isClientView(view) {
+  return String(view || "").indexOf(CLIENT_VIEW) === 0
+}
+
+function clientView(view) {
+  var id = String(view).slice(CLIENT_VIEW.length)
+  if (id === "") return null
+  return { title: "Client", heading: "TRAFFIC · 24H", needs: "client", clientId: id,
+    terminal: getCommand("clients", id) + "; " + quotedCommand("unifictl clients traffic", id),
+    filterHint: "Filter applications by name, category" }
+}
+
 function viewInfo(view) {
+  if (isClientView(view)) return clientView(view)
   return VIEWS[view] || null
 }
 
@@ -508,5 +664,7 @@ function detailRows(view, data, max, filter) {
   if (view === "wifi") return clientRows(data.clients, max, filter, "wireless")
   if (view === "wired") return clientRows(data.clients, max, filter, "wired")
   if (view === "alarms") return logRows(data.logs, filter)
+  var info = viewInfo(view)
+  if (info && info.needs === "client") return appRows(data.clientTraffic, info.clientId, max, filter)
   return []
 }

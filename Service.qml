@@ -5,10 +5,12 @@ import qs.Commons
 import "Model.js" as Model
 
 // Polls `unifictl status -o json` on a timer for the bar icon, and
-// `clients list --self` for this machine's own connection. A failed status
+// `clients list --self` plus `clients traffic` for this machine's own
+// connection and its 24h traffic. A failed status
 // run keeps the last good data and marks it stale instead of blanking the
 // widget. Detail data (devices, clients, logs) is fetched only for the drill-down
-// view that is open, so the main view costs one call per tick.
+// view that is open, so the main view costs three quick calls per tick. The
+// client view ("client:<id>") loads `clients get` and `clients traffic <id>`.
 Item {
   id: root
 
@@ -22,10 +24,17 @@ Item {
   property var devices: null
   property var clients: null
   property var logs: null
+  // Site-wide `clients traffic`, for this machine's 24h total.
+  property var traffic: null
+  // The client view's `clients get <id>` and `clients traffic <id>`. Both
+  // carry the id, so the panel can tell them from a previous client's.
+  property var client: null
+  property var clientTraffic: null
   property bool stale: false
   property string lastError: ""
   property double lastSuccessMs: 0
-  readonly property bool refreshing: statusProc.running || selfProc.running || devicesProc.running || clientsProc.running || logsProc.running
+  readonly property var procs: [statusProc, selfProc, trafficProc, devicesProc, clientsProc, logsProc, clientProc, clientTrafficProc]
+  readonly property bool refreshing: procs.some(function(p) { return p.running })
 
   readonly property string health: Model.overallState(status, stale)
   readonly property int refreshIntervalSec: intSetting("refreshIntervalSec", 60, 15, 3600)
@@ -56,6 +65,7 @@ Item {
   function refresh(force) {
     run(statusProc, ["status"], force === true)
     run(selfProc, ["clients", "list", "--self"], force === true)
+    run(trafficProc, ["clients", "traffic"], force === true)
     refreshDetails(force === true)
   }
 
@@ -65,6 +75,18 @@ Item {
     if (info.needs === "devices") run(devicesProc, ["devices", "list"], force)
     else if (info.needs === "clients") run(clientsProc, ["clients", "list"], force)
     else if (info.needs === "logs") run(logsProc, ["logs", "-r", "-p", "high", "-n", String(logLines)], force)
+    else if (info.needs === "client") {
+      run(clientProc, ["clients", "get", info.clientId], force)
+      run(clientTrafficProc, ["clients", "traffic", info.clientId], force)
+    }
+  }
+
+  // While a fetch for one client ran, opening another client skipped its
+  // own fetch: when the finished one was for a different client, fetch again.
+  // `proc.command` is ["unifictl", "clients", "get"|"traffic", <id>, …].
+  function refetchIfOtherClient(proc) {
+    var info = Model.viewInfo(view)
+    if (info && info.needs === "client" && proc.command[3] !== info.clientId) refreshDetails(false)
   }
 
   onViewChanged: refreshDetails(false)
@@ -119,7 +141,7 @@ Item {
     id: watchdog
     interval: 30000
     onTriggered: {
-      for (var p of [statusProc, selfProc, devicesProc, clientsProc, logsProc]) if (p.running) p.running = false
+      for (var p of root.procs) if (p.running) p.running = false
     }
   }
 
@@ -185,6 +207,42 @@ Item {
       var parsed = exitCode === 0 ? Model.parseNdjson(logsOut.text) : { ok: false }
       if (parsed.ok) root.logs = parsed.value
       else root.failed(logsErr.text, "unifictl logs failed")
+    }
+  }
+
+  // Optional, like selfProc: a failure only drops the traffic figure.
+  Process {
+    id: trafficProc
+    stdout: StdioCollector { id: trafficOut; waitForEnd: true }
+    stderr: StdioCollector { id: trafficErr; waitForEnd: true }
+    onExited: function(exitCode) {
+      var parsed = exitCode === 0 ? Model.parseJson(trafficOut.text) : { ok: false }
+      root.traffic = parsed.ok ? parsed.value : null
+      if (!parsed.ok) console.warn("unifictl clients traffic:", String(trafficErr.text || "").trim())
+    }
+  }
+
+  Process {
+    id: clientProc
+    stdout: StdioCollector { id: clientOut; waitForEnd: true }
+    stderr: StdioCollector { id: clientErr; waitForEnd: true }
+    onExited: function(exitCode) {
+      var parsed = exitCode === 0 ? Model.parseJson(clientOut.text) : { ok: false }
+      if (parsed.ok) root.client = parsed.value
+      else root.failed(clientErr.text, "unifictl clients get failed")
+      root.refetchIfOtherClient(clientProc)
+    }
+  }
+
+  Process {
+    id: clientTrafficProc
+    stdout: StdioCollector { id: clientTrafficOut; waitForEnd: true }
+    stderr: StdioCollector { id: clientTrafficErr; waitForEnd: true }
+    onExited: function(exitCode) {
+      var parsed = exitCode === 0 ? Model.parseJson(clientTrafficOut.text) : { ok: false }
+      if (parsed.ok) root.clientTraffic = parsed.value
+      else root.failed(clientTrafficErr.text, "unifictl clients traffic failed")
+      root.refetchIfOtherClient(clientTrafficProc)
     }
   }
 }

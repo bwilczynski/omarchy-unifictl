@@ -84,9 +84,6 @@ test("leaf rows offer a copy menu and a details command", () => {
   assert.equal(Model.getCommand("clients", "o'brien"), "unifictl clients get 'o'\\''brien'")
   assert.equal(Model.getCommand("devices", ""), "")
 
-  const client = Model.clientRow({ id: "phone-1", name: "phone", connectionType: "wireless" })
-  assert.equal(client.action, "copy")
-  assert.equal(client.details, "unifictl clients get 'phone-1'")
   const [device] = Model.deviceRows({ items: [{ id: "us-8", name: "US 8", status: "connected" }] })
   assert.equal(device.details, "unifictl devices get 'us-8'")
   const [alarm] = Model.logRows([{ title: "x", details: { srcIp: "1.2.3.4" } }])
@@ -133,13 +130,109 @@ test("live status, devices and clients produce rows", () => {
   console.log("wifi", wifi.length, "wired", wired.length, "alarms", logs.value.length)
 
   // Every details command runs as is.
-  for (const r of [wans[0], Model.deviceRows(devices)[0], rows[0]]) {
-    assert.match(r.details, /^unifictl (wans|devices|clients) get '/)
+  for (const r of [wans[0], Model.deviceRows(devices)[0]]) {
+    assert.match(r.details, /^unifictl (wans|devices) get '/)
     execFileSync("bash", ["-c", r.details + " -o json > /dev/null"])
   }
 
   console.log(Model.tooltip(status, Model.overallState(status, false)))
   console.log(JSON.stringify(Model.summaryRows(status).map((r) => [r.title, r.subtitle]), null, 1))
+})
+
+test("bytes and rates read like unifictl's tables", () => {
+  assert.equal(Model.formatBytes(943718400), "900.0 MB")
+  assert.equal(Model.formatBytes(278937), "272.4 KB")
+  assert.equal(Model.formatBytes(2684354560), "2.5 GB")
+  assert.equal(Model.formatBytes(512), "512 B")
+  assert.equal(Model.formatBytes(0), "0 B")
+  assert.equal(Model.formatBytes(undefined), "")
+  assert.equal(Model.formatRate(1536), "1.5 KB/s")
+  assert.equal(Model.formatRate(null), "")
+})
+
+test("client rows open the client view; others keep the terminal", () => {
+  const client = Model.clientRow({ id: "phone-1", name: "phone", connectionType: "wireless" })
+  assert.equal(client.action, "view:client:phone-1")
+  assert.equal(client.details, "view:client:phone-1")
+  assert.equal(Model.clientRow({ name: "no id", connectionType: "wired" }).action, "copy")
+
+  const info = Model.viewInfo("client:phone-1")
+  assert.equal(info.needs, "client")
+  assert.equal(info.clientId, "phone-1")
+  assert.equal(info.terminal, "unifictl clients get 'phone-1'; unifictl clients traffic 'phone-1'")
+  assert.equal(Model.viewInfo("client:"), null)
+  assert.equal(Model.isClientView("client:x"), true)
+  assert.equal(Model.isClientView("wifi"), false)
+})
+
+test("this device shows its 24h traffic", () => {
+  const self = { items: [{ id: "laptop", name: "laptop", ip: "10.0.0.5", connectionType: "wired",
+    connectedTo: { device: { name: "US 8" }, port: 5, linkSpeed: "gbe1" } }] }
+  const traffic = { items: [{ id: "laptop", bytesReceived: 1400000000, bytesTransmitted: 175000000, totalBytes: 1575000000 }] }
+  const [row] = Model.selfRows(self, traffic)
+  assert.equal(row.subtitle, "10.0.0.5 · US 8 port 5 · ↓ 1.3 GB ↑ 166.9 MB 24h")
+  assert.equal(Model.selfRows(self, null)[0].subtitle, "10.0.0.5 · US 8 port 5")
+  assert.equal(Model.selfRows(self, { items: [] })[0].subtitle, "10.0.0.5 · US 8 port 5")
+})
+
+test("client view: info rows from clients get, app rows from clients traffic", () => {
+  const wired = { id: "laptop", name: "laptop", mac: "aa:bb", ip: "10.0.0.5", connectionType: "wired", status: "online",
+    connectedTo: { device: { name: "US 8" }, port: 5, linkSpeed: "gbe1", linkSpeedHealth: "good" },
+    traffic: { rxBytesPerSec: 2048, txBytesPerSec: 1536 }, uptime: 273600 }
+  const rows = Model.clientInfoRows(wired)
+  assert.deepEqual([...rows].map((r) => r.title), ["10.0.0.5", "US 8 · port 5", "↓ 2.0 KB/s  ↑ 1.5 KB/s"])
+  assert.equal(rows[0].subtitle, "aa:bb · wired · online")
+  assert.deepEqual({ ...rows[0].copy }, { ip: "10.0.0.5", name: "laptop", mac: "aa:bb" })
+  assert.equal(rows[1].trailing, "1 GbE")
+  assert.equal(rows[1].grade, "good")
+  assert.equal(rows[2].subtitle, "Right now · up 3d 4h")
+  assert.equal(Model.clientInfoRows(null).length, 0)
+
+  const wifi = Model.clientInfoRows({ id: "s", name: "Speaker", ip: "10.0.0.6", connectionType: "wireless", status: "online",
+    connectedTo: { device: { name: "UAP-01" }, ssid: "HomeWiFi", signalStrength: -70, rateMbps: 130, signalStrengthHealth: "poor" },
+    experience: 95, experienceHealth: "good" })
+  assert.equal(wifi[1].title, "HomeWiFi @ UAP-01")
+  assert.equal(wifi[1].subtitle, "130 Mbps · experience 95%")
+  assert.equal(wifi[1].trailing, "-70 dBm")
+  assert.equal(wifi[1].attention, true)
+  assert.equal(wifi.length, 2, "no rate row without traffic")
+
+  const traffic = { id: "laptop", items: [
+    { name: "SSL/TLS", category: { name: "Network protocols" }, bytesReceived: 314572800, bytesTransmitted: 104857600, totalBytes: 419430400, activitySeconds: 3600 },
+    { name: "Video", category: { name: "Media streaming" }, bytesReceived: 943718400, bytesTransmitted: 41943040, totalBytes: 985661440, activitySeconds: 43200 },
+    { name: "Updates", category: { name: "Software updates" }, bytesReceived: 20971520, bytesTransmitted: 4194304, totalBytes: 25165824, activitySeconds: 0 }
+  ] }
+  const apps = Model.appRows(traffic, "laptop", 10, "")
+  assert.deepEqual([...apps].map((r) => r.title), ["Video", "SSL/TLS", "Updates"], "heaviest first")
+  assert.equal(apps[0].trailing, "940.0 MB")
+  assert.equal(apps[0].subtitle, "Media streaming · ↓ 900.0 MB ↑ 40.0 MB · active 12h 0m")
+  assert.equal(apps[2].subtitle, "Software updates · ↓ 20.0 MB ↑ 4.0 MB")
+  assert.equal(Model.appRows(traffic, "laptop", 10, "updates").length, 1)
+  assert.equal(Model.appRows(traffic, "other", 10, "").length, 0, "stale traffic for another client is ignored")
+  const capped = Model.appRows(traffic, "laptop", 2, "")
+  assert.equal(capped.length, 3)
+  assert.equal(capped[2].action, "term:unifictl clients traffic 'laptop'")
+  assert.equal(Model.detailRows("client:laptop", { clientTraffic: traffic }, 10, "").length, 3)
+
+  assert.equal(Model.trafficHeading(traffic, "laptop"), "TRAFFIC · 24H · ↓ 1.2 GB ↑ 144.0 MB")
+  assert.equal(Model.trafficHeading(null, "laptop"), "TRAFFIC · 24H")
+})
+
+test("live client view and traffic", () => {
+  const self = unifictl("clients", "list", "--self")
+  const traffic = unifictl("clients", "traffic")
+  assert.ok(traffic.items.length > 0)
+  const selfRows = Model.selfRows(self, traffic)
+  console.log("self", JSON.stringify(selfRows.map((r) => r.subtitle)))
+  const id = (self.items[0] || traffic.items[0]).id
+  const client = unifictl("clients", "get", id)
+  const info = Model.clientInfoRows(client)
+  assert.ok(info.length >= 2)
+  const apps = Model.appRows(unifictl("clients", "traffic", id), id, 100, "")
+  assert.ok(apps.length > 0)
+  for (const r of [...info, ...apps, ...selfRows]) assert.ok(!/undefined|NaN/.test(r.title + r.subtitle + (r.trailing || "")), r.title + " " + r.subtitle)
+  console.log(JSON.stringify(info.map((r) => [r.title, r.subtitle, r.trailing])), apps.length, "apps")
+  execFileSync("bash", ["-c", Model.viewInfo("client:" + id).terminal.replace(/;/g, " -o json >/dev/null;") + " -o json >/dev/null"])
 })
 
 test("hero: controller name, falling back to UniFi", () => {

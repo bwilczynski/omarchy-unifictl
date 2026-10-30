@@ -9,13 +9,15 @@ import "Model.js" as Model
 
 // Bar button plus popup. The main view shows Internet and Site from
 // `unifictl status`; Devices / Wi-Fi / Wired / Alarms rows drill down into a
-// detail view that loads its own list on demand.
+// detail view that loads its own list on demand. A client row (This device,
+// Wi-Fi, Wired) opens the client view: `clients get` and its traffic by app.
 //
 // Mouse: left = popup, middle = force refresh, right = open console URL.
 // Keys: up/down move, enter or right drills in (on a leaf row enter opens
 // its copy menu), left/esc goes back (esc on the main view closes),
 // r refresh, t open in terminal, o console, c/n/m copy IP/name/MAC,
-// d details of the selected row in a terminal, / filter the open list.
+// d details of the selected row (client view, or a terminal), / filter the
+// open list.
 Panel {
   id: root
   moduleName: "bwilczynski.unifictl"
@@ -56,11 +58,19 @@ Panel {
   readonly property int maxClients: Math.max(1, parseInt(setting("maxClients", 10), 10) || 10)
   readonly property string barLabelMode: String(setting("barLabel", "none"))
 
-  // "" = main view; otherwise a key of Model.VIEWS.
+  // "" = main view; otherwise a key of Model.VIEWS, or "client:<id>".
   property string view: ""
   readonly property var viewInfo: Model.viewInfo(view)
+  readonly property bool clientView: Model.isClientView(view)
+  // The client view's `clients get`, once it is for the client on screen.
+  readonly property var viewClient: clientView && service.client && viewInfo && service.client.id === viewInfo.clientId ? service.client : null
   readonly property bool detailLoaded: !viewInfo || (viewInfo.needs === "devices" ? service.devices !== null
-    : viewInfo.needs === "clients" ? service.clients !== null : service.logs !== null)
+    : viewInfo.needs === "clients" ? service.clients !== null
+    : viewInfo.needs === "client" ? Model.clientTraffic(service.clientTraffic, viewInfo.clientId) !== null
+    : service.logs !== null)
+  // Where back from the client view lands: the list, row and filter it was
+  // opened from. { view, section, index, filter }
+  property var returnTo: null
 
   property bool cursorActive: false
   property string cursorSection: ""
@@ -85,7 +95,8 @@ Panel {
   }
 
   function navigableSections() {
-    var all = view === "" ? [wanSection, selfSection, summarySection] : [detailSection]
+    var all = view === "" ? [wanSection, selfSection, summarySection]
+      : clientView ? [clientSection, detailSection] : [detailSection]
     return all.filter(function(s) { return s.available })
   }
 
@@ -163,9 +174,11 @@ Panel {
     if (section) openDetails(section.detailsCommand(cursorIndex))
   }
 
-  // `unifictl … get <id>` for one row, in a floating terminal.
+  // A row's details: "view:client:<id>" opens the client view, anything
+  // else is `unifictl … get <id>` for a floating terminal.
   function openDetails(command) {
-    if (command !== "") runAction("term:" + command)
+    if (command.indexOf("view:") === 0) runAction(command)
+    else if (command !== "") runAction("term:" + command)
   }
 
   function restoreKeyFocus() {
@@ -174,13 +187,16 @@ Panel {
 
   function setView(next) {
     var from = view
+    var here = { view: from, section: cursorSection, index: cursorIndex, filter: filterText }
     if (filtering) stopFilter(false)
     filterText = ""
+    if (!Model.isClientView(next)) returnTo = null
+    else if (!Model.isClientView(from)) returnTo = here
     view = next
     flick.contentY = 0
     if (!cursorActive) return
     if (next !== "") {
-      setCursor("detail", 0)
+      setCursor(Model.isClientView(next) ? "client" : "detail", 0)
     } else {
       // Land back on the row we drilled in from.
       var rows = summarySection.rows
@@ -190,7 +206,15 @@ Panel {
   }
 
   function back() {
-    if (view !== "") setView("")
+    if (view === "") return
+    var to = clientView ? returnTo : null
+    setView(to ? to.view : "")
+    if (!to) return
+    filterText = to.filter
+    if (cursorActive) {
+      setCursor(to.section, to.index)
+      Qt.callLater(function() { root.clampCursor(); root.scrollCursorIntoView() })
+    }
   }
 
   // Right arrow: drill into the row under the cursor, if it is drillable.
@@ -252,6 +276,7 @@ Panel {
     if (filtering) stopFilter(false)
     view = ""
     filterText = ""
+    returnTo = null
   }
 
   Service {
@@ -264,6 +289,8 @@ Panel {
     onDevicesChanged: Qt.callLater(root.clampCursor)
     onClientsChanged: Qt.callLater(root.clampCursor)
     onLogsChanged: Qt.callLater(root.clampCursor)
+    onClientChanged: Qt.callLater(root.clampCursor)
+    onClientTrafficChanged: Qt.callLater(root.clampCursor)
   }
 
   Timer {
@@ -297,7 +324,10 @@ Panel {
       return "ok"
     }
     function currentView(): string { return root.view }
-    function rowCount(): int { return root.view === "" ? wanSection.rowCount + selfSection.rowCount + summarySection.rowCount : detailSection.rowCount }
+    function rowCount(): int {
+      if (root.view === "") return wanSection.rowCount + selfSection.rowCount + summarySection.rowCount
+      return (root.clientView ? clientSection.rowCount : 0) + detailSection.rowCount
+    }
   }
 
   // ---- bar button -------------------------------------------------------------
@@ -443,7 +473,7 @@ Panel {
             panel: root
             sectionId: "self"
             heading: "THIS DEVICE"
-            rows: Model.selfRows(service.selfClient)
+            rows: Model.selfRows(service.selfClient, service.traffic)
           }
 
           Section {
@@ -478,7 +508,8 @@ Panel {
               Text {
                 anchors.verticalCenter: parent.verticalCenter
                 textFormat: Text.PlainText
-                text: root.viewInfo ? root.viewInfo.title : ""
+                text: root.viewClient ? (root.viewClient.name || root.viewClient.mac || "Client")
+                  : (root.viewInfo ? root.viewInfo.title : "")
                 color: root.foreground
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.title
@@ -509,6 +540,16 @@ Panel {
             }
           }
 
+          // Client view: addresses, link and current rate from `clients get`.
+          Section {
+            id: clientSection
+            visible: root.clientView && available
+            panel: root
+            sectionId: "client"
+            heading: root.viewClient ? Model.join([root.viewClient.connectionType, root.viewClient.status]).toUpperCase() : ""
+            rows: root.clientView ? Model.clientInfoRows(root.viewClient) : []
+          }
+
           // Top of the list, so it stays on screen however long the list is.
           TextField {
             id: filterField
@@ -528,9 +569,10 @@ Panel {
             panel: root
             sectionId: "detail"
             heading: root.filterText !== "" ? "FILTER · \"" + root.filterText + "\""
+              : root.clientView ? Model.trafficHeading(service.clientTraffic, root.viewInfo.clientId)
               : (root.viewInfo ? root.viewInfo.heading : "")
             rows: root.view === "" ? [] : Model.detailRows(root.view,
-              { devices: service.devices, clients: service.clients, logs: service.logs },
+              { devices: service.devices, clients: service.clients, logs: service.logs, clientTraffic: service.clientTraffic },
               root.maxClients, root.filterText)
           }
 
@@ -538,7 +580,8 @@ Panel {
             visible: root.view !== "" && !detailSection.available
             width: parent.width
             textFormat: Text.PlainText
-            text: !root.detailLoaded ? "Loading…" : (root.filterText !== "" ? "No matches" : "Nothing to show")
+            text: !root.detailLoaded ? "Loading…" : root.filterText !== "" ? "No matches"
+              : root.clientView ? "No internet traffic in the last 24h" : "Nothing to show"
             color: root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.bodySmall

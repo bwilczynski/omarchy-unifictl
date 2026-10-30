@@ -8,7 +8,8 @@ import "../Model.js" as Model
 
 // One keyboard-and-mouse navigable row: glyph, title over subtitle, an
 // optional trailing value, and for leaf rows a copy button (menu of IP, MAC,
-// name) and a details button (`unifictl … get` in a terminal). Follows the CursorSurface contract — visuals come
+// name) and a details button (the client view, or `unifictl … get` in a
+// terminal). Follows the CursorSurface contract — visuals come
 // from `hasCursor`, and hovering reports back to the panel instead of
 // painting its own highlight.
 CursorSurface {
@@ -29,7 +30,7 @@ CursorSurface {
   property string grade: ""
   // [{ kind, label, value }] from Model.copyOptions; empty hides the button.
   property var copyOptions: []
-  // Terminal command for the details button; "" hides it.
+  // "view:…" or a terminal command for the details button; "" hides it.
   property string details: ""
   property int copyIndex: 0
 
@@ -147,7 +148,7 @@ CursorSurface {
     PanelActionButton {
       visible: row.details !== ""
       iconText: Model.ICONS.details
-      tooltipText: "Details in terminal (d)"
+      tooltipText: row.details.indexOf("view:") === 0 ? "Details (d)" : "Details in terminal (d)"
       foreground: row.panel ? row.panel.foreground : Color.foreground
       fontFamily: row.panel ? row.panel.fontFamily : Style.font.family
       Layout.alignment: Qt.AlignVCenter

@@ -9,8 +9,9 @@ look, dimmed when the last refresh failed. Clicking it opens a compact popup:
 - **Internet:** each WAN with its IP, uptime, 24h availability and latency.
 - **This device:** this machine as the controller sees it
   (`unifictl clients list --self`), one row per connection (cable and Wi-Fi
-  both show when both are up): IP, the switch port or AP/SSID it is on, and
-  its link speed or signal. Hidden when the controller doesn't know it.
+  both show when both are up): IP, the switch port or AP/SSID it is on, its
+  link speed or signal, and its internet traffic over the last 24h
+  (`unifictl clients traffic`). Hidden when the controller doesn't know it.
 - **Site:** Devices, Wi-Fi, Wired and Alarms summaries. Each one drills down
   into a detail view:
 
@@ -21,13 +22,20 @@ look, dimmed when the last refresh failed. Clicking it opens a compact popup:
 | Wired | `unifictl clients list` | wired clients with switch, port and link speed |
 | Alarms | `unifictl logs -r -p high` | recent high-severity events |
 
+Opening any client (This device, Wi-Fi, Wired) shows the **client view**:
+its IP, MAC, where it is connected and how well, its current download and
+upload rate (`unifictl clients get <id>`), and its internet traffic over the
+last 24h by application, heaviest first (`unifictl clients traffic <id>`).
+Back returns to the list and row you opened it from.
+
 Values unifictl grades (WAN latency, device experience, Wi-Fi signal, link
 speed) are coloured the way unifictl's tables colour them: green, yellow, red
 for good, fair, poor, taken from the theme's `colors.toml`. A poor grade
 also tints the whole row.
 
 Detail lists are fetched only when their view is open, so the bar costs
-`unifictl status` and `unifictl clients list --self` per refresh.
+`unifictl status`, `unifictl clients list --self` and `unifictl clients
+traffic` per refresh.
 
 ## Requirements
 
@@ -55,21 +63,22 @@ omarchy plugin enable bwilczynski.unifictl
 **Mouse:** left-click opens the popup, middle-click forces a refresh, and
 right-click opens the console URL (if set). Device, client and WAN rows have
 two buttons: copy opens a menu of the row's IP, MAC and name, and details
-runs `unifictl devices|clients|wans get <id>` in a floating terminal.
+opens the client view for a client, or runs `unifictl devices|wans get <id>`
+in a floating terminal. Clicking a client row opens the client view too.
 
 **Keys in the popup:**
 
 | Key | Action |
 |---|---|
 | ↑ ↓ / `j` `k` | move |
-| Enter | activate the row: drill down, or open its copy menu (↑ ↓ / `j` `k` pick, Enter copies, Esc closes) |
-| → / `l` | drill down (Site rows) |
-| ← / `h`, Esc | back to the main view (Esc on the main view closes) |
+| Enter | activate the row: drill down, open a client, or open its copy menu (↑ ↓ / `j` `k` pick, Enter copies, Esc closes) |
+| → / `l` | drill down (Site rows) or open a client |
+| ← / `h`, Esc | back: from a client to its list, from a list to the main view (Esc on the main view closes) |
 | `r` | refresh, bypassing unifictl's cache |
-| `t` | open the current view in a terminal (`unifictl topology`, `clients list`, `logs`) |
+| `t` | open the current view in a terminal (`unifictl topology`, `clients list`, `logs`, `clients get` + `clients traffic`) |
 | `c` `n` `m` | copy the IP, name or MAC of the selected row |
-| `d` | show the selected row's details in a terminal (`unifictl … get <id>`) |
-| `/` | filter the open list (devices, clients, alarms); Enter keeps the filter, Esc clears it |
+| `d` | show the selected row's details: the client view for a client, else `unifictl … get <id>` in a terminal |
+| `/` | filter the open list (devices, clients, alarms, a client's applications); Enter keeps the filter, Esc clears it |
 | `o` | open the UniFi console |
 
 ## Settings

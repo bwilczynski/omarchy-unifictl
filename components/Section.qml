@@ -12,7 +12,7 @@ import "../Model.js" as Model
 //     attention: bool, muted: bool,                   // urgent tint / dimmed
 //     grade: "good" | "fair" | "poor" | "",           // colours `trailing`
 //     copy: { ip: "…", name: "…", mac: "…" },         // copy menu, c / n / m
-//     details: "unifictl devices get …",              // details button, d
+//     details: "unifictl devices get …" | "view:…",   // details button, d
 //     action: "copy" | "view:…" | "term:…"            // Enter and click
 //   }
 //
