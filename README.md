@@ -65,13 +65,6 @@ traffic` per refresh.
 omarchy plugin add https://github.com/bwilczynski/omarchy-unifictl --enable
 ```
 
-Or clone it by hand:
-
-```sh
-git clone https://github.com/bwilczynski/omarchy-unifictl ~/.config/omarchy/plugins/bwilczynski.unifictl
-omarchy plugin enable bwilczynski.unifictl
-```
-
 ## Remove
 
 ```sh
