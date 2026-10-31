@@ -72,6 +72,15 @@ git clone https://github.com/bwilczynski/omarchy-unifictl ~/.config/omarchy/plug
 omarchy plugin enable bwilczynski.unifictl
 ```
 
+## Remove
+
+```sh
+omarchy plugin remove bwilczynski.unifictl
+```
+
+The plugin writes no files of its own. Removing it leaves `unifictl` and its
+configuration untouched.
+
 ## Usage
 
 **Mouse:** left-click opens the popup, middle-click forces a refresh, and
