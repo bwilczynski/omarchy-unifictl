@@ -12,6 +12,11 @@ import "Model.js" as Model
 // view that is open, so the main view costs three quick calls per tick. The
 // client view ("client:<id>") loads `clients get` and `clients traffic <id>`,
 // the device view ("device:<id>") `devices get <id>`.
+//
+// Before polling, a probe checks that unifictl is on PATH and new enough;
+// a failing `status` that names the missing config file marks it as
+// unconfigured. Until setup is fixed the popup shows what to do, and each
+// tick (or manual refresh) checks again.
 Item {
   id: root
 
@@ -36,10 +41,14 @@ Item {
   property bool stale: false
   property string lastError: ""
   property double lastSuccessMs: 0
-  readonly property var procs: [statusProc, selfProc, trafficProc, devicesProc, clientsProc, logsProc, clientProc, clientTrafficProc, deviceProc]
+  // checking | ok | missing | outdated | unconfigured
+  property string setup: "checking"
+  property string foundVersion: ""
+  readonly property var setupIssue: Model.setupIssue(setup, foundVersion)
+  readonly property var procs: [probeProc, statusProc, selfProc, trafficProc, devicesProc, clientsProc, logsProc, clientProc, clientTrafficProc, deviceProc]
   readonly property bool refreshing: procs.some(function(p) { return p.running })
 
-  readonly property string health: Model.overallState(status, stale)
+  readonly property string health: Model.overallState(status, stale, setup)
   readonly property int refreshIntervalSec: intSetting("refreshIntervalSec", 60, 15, 3600)
   readonly property bool notifyOnChange: setting("notify", true) !== false
   readonly property string consoleUrl: String(setting("consoleUrl", ""))
@@ -66,7 +75,12 @@ Item {
   }
 
   function refresh(force) {
+    if (setup === "checking" || setup === "missing" || setup === "outdated") {
+      if (!probeProc.running) probeProc.running = true
+      return
+    }
     run(statusProc, ["status"], force === true)
+    if (setup === "unconfigured") return
     run(selfProc, ["clients", "list", "--self"], force === true)
     run(trafficProc, ["clients", "traffic"], force === true)
     refreshDetails(force === true)
@@ -149,6 +163,18 @@ Item {
     }
   }
 
+  // sh exits 127 when unifictl is not on PATH.
+  Process {
+    id: probeProc
+    command: ["sh", "-c", "command -v unifictl >/dev/null || exit 127; unifictl --version"]
+    stdout: StdioCollector { id: probeOut; waitForEnd: true }
+    onExited: function(exitCode) {
+      root.foundVersion = probeOut.text.trim()
+      root.setup = Model.probeResult(exitCode, probeOut.text)
+      if (root.setup === "ok") root.refresh(false)
+    }
+  }
+
   Process {
     id: statusProc
     stdout: StdioCollector { id: statusOut; waitForEnd: true }
@@ -160,7 +186,13 @@ Item {
         root.stale = false
         root.lastError = ""
         root.lastSuccessMs = Date.now()
+        if (root.setup === "unconfigured") {
+          root.setup = "ok"
+          root.refresh(false)
+        }
       } else {
+        if (Model.isConfigError(statusErr.text)) root.setup = "unconfigured"
+        else if (root.setup === "unconfigured") root.setup = "ok"
         root.failed(statusErr.text, parsed.error || "unexpected status output")
         if (root.status) root.stale = true
       }

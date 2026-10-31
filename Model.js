@@ -36,8 +36,69 @@ function verdictLevel(verdict) {
   return 2
 }
 
-// Overall widget state: loading | stale | ok | warning | error
-function overallState(status, stale) {
+// ---- setup ------------------------------------------------------------------
+
+// The widget checks unifictl before it polls: installed, new enough, and
+// configured. A problem shows in the popup with the command that fixes it.
+var MIN_VERSION = "0.4.3"
+var INSTALL_COMMAND = "mise use -g github:bwilczynski/unifictl@latest"
+var CONFIGURE_COMMAND = "unifictl config init"
+
+// "unifictl 0.4.4" -> [0, 4, 4]; null when the text has no version.
+function parseVersion(text) {
+  var m = /(\d+)\.(\d+)\.(\d+)/.exec(String(text || ""))
+  return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null
+}
+
+function versionAtLeast(found, min) {
+  for (var i = 0; i < 3; i++) if (found[i] !== min[i]) return found[i] > min[i]
+  return true
+}
+
+// The probe runs `unifictl --version` through sh, which exits 127 when
+// unifictl is not on PATH. Anything unexpected passes: `status` will say
+// what is wrong.
+function probeResult(exitCode, output) {
+  if (exitCode === 127) return "missing"
+  var found = exitCode === 0 ? parseVersion(output) : null
+  if (found && !versionAtLeast(found, parseVersion(MIN_VERSION))) return "outdated"
+  return "ok"
+}
+
+function isConfigError(stderr) {
+  return /no config file|unifictl config init/i.test(String(stderr || ""))
+}
+
+// setup: checking | ok | missing | outdated | unconfigured. null when the
+// widget can poll; otherwise { title, detail, actionLabel, command }.
+function setupIssue(setup, versionText) {
+  if (setup === "missing") return {
+    title: "unifictl not found",
+    detail: "This widget needs unifictl " + MIN_VERSION + " or newer on the shell's PATH.",
+    actionLabel: "Install",
+    command: INSTALL_COMMAND
+  }
+  if (setup === "outdated") {
+    var found = parseVersion(versionText)
+    return {
+      title: "unifictl " + (found ? found.join(".") : "") + " is too old",
+      detail: "This widget needs unifictl " + MIN_VERSION + " or newer.",
+      actionLabel: "Update",
+      command: INSTALL_COMMAND
+    }
+  }
+  if (setup === "unconfigured") return {
+    title: "unifictl is not configured",
+    detail: "Set the controller host and API key, then refresh.",
+    actionLabel: "Configure",
+    command: CONFIGURE_COMMAND
+  }
+  return null
+}
+
+// Overall widget state: loading | setup | stale | ok | warning | error
+function overallState(status, stale, setup) {
+  if (setupIssue(setup, "")) return "setup"
   if (!status || !(Array.isArray(status.rows))) return stale ? "stale" : "loading"
   if (stale) return "stale"
   var worst = 0
@@ -128,7 +189,7 @@ function join(parts) {
 // ---- bar ------------------------------------------------------------------
 
 function barIcon(state) {
-  if (state === "stale") return ICONS.offline
+  if (state === "stale" || state === "setup") return ICONS.offline
   if (needsAttention(state)) return ICONS.alert
   return ICONS.network
 }

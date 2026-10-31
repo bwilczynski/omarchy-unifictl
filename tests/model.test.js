@@ -42,6 +42,48 @@ test("verdicts: idle is fine, warn is a warning, anything else is an error", () 
   assert.equal(Model.overallState(s("ok"), true), "stale")
 })
 
+test("setup probe: missing, too old, or good to go", () => {
+  assert.equal(Model.probeResult(127, ""), "missing")
+  assert.equal(Model.probeResult(0, "unifictl 0.4.2\n"), "outdated")
+  assert.equal(Model.probeResult(0, "unifictl 0.3.9"), "outdated")
+  assert.equal(Model.probeResult(0, "unifictl 0.4.3"), "ok")
+  assert.equal(Model.probeResult(0, "unifictl 1.0.0"), "ok")
+  assert.equal(Model.probeResult(0, "unifictl 0.10.0"), "ok")
+  // An odd --version is no reason to block: `status` reports what is wrong.
+  assert.equal(Model.probeResult(0, "unifictl dev"), "ok")
+  assert.equal(Model.probeResult(2, ""), "ok")
+})
+
+test("setup: a missing config file is told apart from other failures", () => {
+  assert.equal(Model.isConfigError("Error: config: no config file at /x/unifictl/config.toml; run `unifictl config init`"), true)
+  assert.equal(Model.isConfigError("Error: connection refused"), false)
+  assert.equal(Model.isConfigError(""), false)
+})
+
+test("setup issues name the problem and the command that fixes it", () => {
+  assert.equal(Model.setupIssue("ok", ""), null)
+  assert.equal(Model.setupIssue("checking", ""), null)
+  const missing = Model.setupIssue("missing", "")
+  assert.match(missing.title, /not found/)
+  assert.equal(missing.actionLabel, "Install")
+  assert.match(missing.command, /^mise use -g github:bwilczynski\/unifictl/)
+  const old = Model.setupIssue("outdated", "unifictl 0.4.1")
+  assert.match(old.title, /0\.4\.1/)
+  assert.match(old.detail, /0\.4\.3/)
+  assert.equal(old.actionLabel, "Update")
+  const unconfigured = Model.setupIssue("unconfigured", "")
+  assert.equal(unconfigured.actionLabel, "Configure")
+  assert.equal(unconfigured.command, "unifictl config init")
+})
+
+test("a setup problem overrides the network state", () => {
+  assert.equal(Model.overallState({ rows: [{ verdict: "fail" }] }, false, "unconfigured"), "setup")
+  assert.equal(Model.overallState(null, false, "missing"), "setup")
+  assert.equal(Model.overallState(null, false, "checking"), "loading")
+  assert.equal(Model.barIcon("setup"), Model.ICONS.offline)
+  assert.equal(Model.needsAttention("setup"), false)
+})
+
 test("grades: only good, fair and poor count", () => {
   assert.equal(Model.grade("good"), "good")
   assert.equal(Model.grade("poor"), "poor")

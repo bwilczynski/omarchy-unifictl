@@ -240,6 +240,13 @@ Panel {
     runAction("term:" + (viewInfo ? viewInfo.terminal : "unifictl topology"))
   }
 
+  // Runs the command that fixes a setup problem in a floating terminal.
+  function fixSetup() {
+    if (!service.setupIssue) return
+    service.openTerminal(service.setupIssue.command)
+    close()
+  }
+
   function runAction(action) {
     if (action.indexOf("view:") === 0) {
       setView(action.slice(5))
@@ -280,6 +287,7 @@ Panel {
   implicitHeight: button.implicitHeight
 
   onOpenedChanged: if (opened) {
+    if (service.setupIssue) service.refresh(false)
     cursorActive = false
     nowMs = Date.now()
     flick.contentY = 0
@@ -330,6 +338,7 @@ Panel {
     function health(): string { return root.health }
     function status(): string { return JSON.stringify(service.status) }
     function error(): string { return service.lastError }
+    function setup(): string { return service.setup }
     function view(name: string): string {
       if (name !== "" && !Model.viewInfo(name)) return "unknown view: " + name
       root.open()
@@ -347,7 +356,7 @@ Panel {
 
   readonly property string barText: Model.barLabel(status, barLabelMode)
   readonly property color barTone: Model.needsAttention(health) ? urgent
-    : (health === "stale" || health === "loading" ? Qt.darker(barForeground, 1.55) : barForeground)
+    : (health === "stale" || health === "loading" || health === "setup" ? Qt.darker(barForeground, 1.55) : barForeground)
   readonly property Item button: barText === "" ? iconButton : textButton
 
   BarIconButton {
@@ -357,7 +366,7 @@ Panel {
     bar: root.bar
     text: Model.barIcon(root.health)
     foreground: root.barTone
-    tooltipText: root.opened ? "" : Model.tooltip(root.status, root.health)
+    tooltipText: root.opened ? "" : service.setupIssue ? "UniFi: " + service.setupIssue.title : Model.tooltip(root.status, root.health)
     onPressed: function(buttonCode) { root.handlePress(buttonCode) }
   }
 
@@ -368,7 +377,7 @@ Panel {
     bar: root.bar
     text: Model.barIcon(root.health) + " " + root.barText
     foreground: root.barTone
-    tooltipText: root.opened ? "" : Model.tooltip(root.status, root.health)
+    tooltipText: root.opened ? "" : service.setupIssue ? "UniFi: " + service.setupIssue.title : Model.tooltip(root.status, root.health)
     onPressed: function(buttonCode) { root.handlePress(buttonCode) }
   }
 
@@ -393,7 +402,10 @@ Panel {
         else if (dx < 0) root.back()
         else if (dx > 0) root.drillCursor()
       }
-      onActivateRequested: if (root.cursorActive) root.activateCursor()
+      onActivateRequested: {
+        if (root.view === "" && service.setupIssue) root.fixSetup()
+        else if (root.cursorActive) root.activateCursor()
+      }
       onCloseRequested: root.view !== "" ? root.back() : root.close()
       onTabRequested: function(direction) { root.switchPanel(direction) }
       onTextKey: function(t) {
@@ -428,10 +440,11 @@ Panel {
             visible: root.view === ""
             width: parent.width
             title: Model.controllerName(root.status)
-            meta: root.status ? Model.headline(root.status) : (service.lastError || "Loading…")
+            meta: service.setupIssue ? service.setupIssue.title
+              : root.status ? Model.headline(root.status) : (service.lastError || "Loading…")
             foreground: root.foreground
             fontFamily: root.fontFamily
-            iconOpacity: root.health === "stale" || root.health === "loading" ? 0.5 : 1.0
+            iconOpacity: root.health === "stale" || root.health === "loading" || root.health === "setup" ? 0.5 : 1.0
             iconComponent: Component {
               Text {
                 textFormat: Text.PlainText
@@ -468,6 +481,41 @@ Panel {
                   onClicked: service.openConsole()
                 }
               }
+            }
+          }
+
+          // What stops the widget from polling, and the command that fixes it.
+          Column {
+            visible: root.view === "" && service.setupIssue !== null
+            width: parent.width
+            spacing: Style.space(8)
+
+            Text {
+              width: parent.width
+              textFormat: Text.PlainText
+              text: service.setupIssue ? service.setupIssue.detail : ""
+              color: root.dim
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.bodySmall
+              wrapMode: Text.Wrap
+            }
+
+            Text {
+              width: parent.width
+              textFormat: Text.PlainText
+              text: service.setupIssue ? service.setupIssue.command : ""
+              color: root.foreground
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.bodySmall
+              wrapMode: Text.WrapAnywhere
+            }
+
+            Button {
+              bordered: true
+              text: service.setupIssue ? service.setupIssue.actionLabel + " in terminal (enter)" : ""
+              foreground: root.foreground
+              fontFamily: root.fontFamily
+              onClicked: root.fixSetup()
             }
           }
 
@@ -663,6 +711,7 @@ Panel {
             width: parent.width
             text: {
               if (root.flash !== "") return root.flash
+              if (service.setupIssue) return ""
               if (service.lastError !== "") return service.lastError
               return service.lastSuccessMs > 0 ? "updated " + Model.formatAge(service.lastSuccessMs, root.nowMs) : ""
             }
