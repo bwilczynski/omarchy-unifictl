@@ -1,7 +1,6 @@
 import QtQuick
 import Quickshell
 import Quickshell.Io
-import qs.Commons
 import "Model.js" as Model
 
 // Polls `unifictl status -o json` on a timer for the bar icon, and
@@ -142,7 +141,24 @@ Item {
   function copy(text) {
     var value = String(text || "")
     if (value === "") return
-    Quickshell.execDetached(["bash", "-c", "printf %s " + Util.shellQuote(value) + " | wl-copy"])
+    clipboardProcess.createObject(root, { text: value, running: true })
+  }
+
+  // Keep controller text out of process arguments. Each copy owns its process
+  // so a second click cannot overwrite a pending clipboard payload.
+  Component {
+    id: clipboardProcess
+    Process {
+      property string text: ""
+      command: ["wl-copy"]
+      stdinEnabled: true
+      onStarted: {
+        write(text)
+        text = ""
+        stdinEnabled = false
+      }
+      onExited: destroy()
+    }
   }
 
   Timer {
