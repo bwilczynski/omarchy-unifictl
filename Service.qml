@@ -53,6 +53,8 @@ Item {
   readonly property string consoleUrl: String(setting("consoleUrl", ""))
 
   property string _notifiedState: ""
+  property bool _statusReady: false
+  property bool _refreshForced: false
 
   function setting(name, fallback) {
     var value = settings ? settings[name] : undefined
@@ -74,18 +76,21 @@ Item {
   }
 
   function refresh(force) {
+    // Do not overlap cycles, or start more credential requests while status
+    // is waiting for the user's password manager to unlock.
+    if (refreshing) return
+    _statusReady = false
+    _refreshForced = force === true
     if (setup === "checking" || setup === "missing" || setup === "outdated") {
       if (!probeProc.running) probeProc.running = true
       return
     }
     run(statusProc, ["status"], force === true)
-    if (setup === "unconfigured") return
-    run(selfProc, ["clients", "list", "--self"], force === true)
-    run(trafficProc, ["clients", "traffic"], force === true)
-    refreshDetails(force === true)
   }
 
   function refreshDetails(force) {
+    // View changes must not bypass a pending or failed status request.
+    if (!_statusReady) return
     var info = Model.viewInfo(view)
     if (!info) return
     if (info.needs === "devices") run(devicesProc, ["devices", "list"], force)
@@ -187,7 +192,9 @@ Item {
     onExited: function(exitCode) {
       root.foundVersion = probeOut.text.trim()
       root.setup = Model.probeResult(exitCode, probeOut.text)
-      if (root.setup === "ok") root.refresh(false)
+      // Process.running settles after onExited; defer the next cycle so the
+      // overlapping-refresh guard sees the probe as finished.
+      if (root.setup === "ok") Qt.callLater(function() { root.refresh(root._refreshForced) })
     }
   }
 
@@ -202,10 +209,11 @@ Item {
         root.stale = false
         root.lastError = ""
         root.lastSuccessMs = Date.now()
-        if (root.setup === "unconfigured") {
-          root.setup = "ok"
-          root.refresh(false)
-        }
+        root.setup = "ok"
+        root._statusReady = true
+        root.run(selfProc, ["clients", "list", "--self"], root._refreshForced)
+        root.run(trafficProc, ["clients", "traffic"], root._refreshForced)
+        root.refreshDetails(root._refreshForced)
       } else {
         if (Model.isConfigError(statusErr.text)) root.setup = "unconfigured"
         else if (root.setup === "unconfigured") root.setup = "ok"

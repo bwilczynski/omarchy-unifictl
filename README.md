@@ -51,6 +51,13 @@ Detail lists are fetched only when their view is open, so the bar costs
 `unifictl status`, `unifictl clients list --self` and `unifictl clients
 traffic` per refresh.
 
+Each refresh runs `status` first. Only after it succeeds does the widget fetch
+this device, traffic, and the open detail view. If authentication is cancelled
+or status otherwise fails, that cycle stops and the last good status stays
+visible as stale. This avoids concurrent credential requests at the start of
+a refresh without assuming a particular password manager. It does not prevent
+`unifictl` from prompting when credentials need unlocking.
+
 ## Requirements
 
 - Omarchy with the Quickshell-based `omarchy-shell`
