@@ -5,7 +5,7 @@
   "version": "0.1.0",
   "author": "Bartłomiej Wilczyński",
   "license": "MIT",
-  "description": "UniFi network health in the Omarchy bar, driven by unifictl: WANs, devices, Wi-Fi, wired, alarms, updates, and clients.",
+  "description": "Explore your UniFi network from the Omarchy bar: follow switch ports to connected devices and clients, see each client's last 24 hours of internet traffic by application, and check WAN health and alarms. Requires a configured unifictl installation.",
   "kinds": [
     "bar-widget"
   ],
@@ -14,7 +14,7 @@
   },
   "barWidget": {
     "displayName": "UniFi (unifictl)",
-    "description": "Site health from `unifictl status`, with devices and clients one click away.",
+    "description": "UniFi health, connected devices and clients, and 24-hour internet traffic by application, powered by unifictl.",
     "category": "Network",
     "allowMultiple": false,
     "defaultSection": "right",
